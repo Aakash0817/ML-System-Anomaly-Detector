@@ -362,8 +362,7 @@ class MainWindow(QMainWindow):
 
     def _setup_anomaly_tab(self):
         """
-        Anomaly Log tab: scrollable table of every anomaly event,
-        with timestamp, scores, top explanation, and per-model votes.
+        Anomaly Log tab: updated to show full model names.
         """
         layout = QVBoxLayout(self.tab_anomaly)
 
@@ -391,11 +390,10 @@ class MainWindow(QMainWindow):
         n_models = len(self.detectors)
         model_names = [d[0] for d in self.detectors]
 
-        # Fixed columns: Time | CPU% | CPU°C | GPU% | GPU°C | Score | Top Cause
-        # Then one column per model showing its individual score
         fixed_cols  = ["Time", "CPU %", "CPU °C", "GPU %", "GPU °C",
                         "Agg Score", "Top Cause"]
-        model_cols  = [f"{n[:6]}…" if len(n) > 8 else n for n in model_names]
+        # Use full names for model columns
+        model_cols  = model_names
         all_cols    = fixed_cols + model_cols
 
         self.anomaly_table = QTableWidget()
@@ -403,10 +401,11 @@ class MainWindow(QMainWindow):
         self.anomaly_table.setHorizontalHeaderLabels(all_cols)
         self.anomaly_table.setRowCount(0)
 
-        # --- FIX 1: Use Stretch for equal column widths ---
-        self.anomaly_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Use ResizeToContents to ensure full visibility of names
+        self.anomaly_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Set the "Top Cause" (index 6) to Stretch for better layout
+        self.anomaly_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
 
-        # --- Other table properties ---
         self.anomaly_table.setAlternatingRowColors(True)
         self.anomaly_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.anomaly_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -424,63 +423,47 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_row)
 
     # ─────────────────────────────────────────────────────────────────────
-    # Collector management
+    # Master refresh 
     # ─────────────────────────────────────────────────────────────────────
 
-    def _start_collector(self):
-        self.collector = DataCollector(self.detectors)
-        self.collector.new_data.connect(self._on_new_data)
-        self._coll_thread = threading.Thread(
-            target=self.collector.run, daemon=True
-        )
-        self._coll_thread.start()
+    def _refresh(self):
+        if not self.buffer:
+            return
+        data_list  = list(self.buffer)
+        times      = [d[0] for d in data_list]
+        t0         = times[0]
+        rel        = [t - t0 for t in times]
+        active_tab = self.tabs.currentIndex()
 
-    def toggle_collection(self):
-        if self.collecting:
-            self.collector.stop()
-            self.btn_pause.setText("▶  Resume")
-            self.lbl_status.setText("● Paused")
-            self.lbl_status.setStyleSheet(
-                "color:#d97706; font:9pt 'Segoe UI'; font-weight:bold;"
-            )
-            self.collecting = False
-        else:
-            self._start_collector()
-            self.btn_pause.setText("⏸  Pause")
-            self.lbl_status.setText("● Collecting")
-            self.lbl_status.setStyleSheet(
-                "color:#16a34a; font:9pt 'Segoe UI'; font-weight:bold;"
-            )
-            self.collecting = True
+        self._update_system(data_list, rel)
 
-    def clear_anomaly_log(self):
-        self.anomaly_log.clear()
-        self.anomaly_table.setRowCount(0)
-        self.lbl_total_anomalies.setText("Total anomalies: 0")
-        self.lbl_last_anomaly.setText("Last anomaly: —")
-        self.lbl_anomaly_rate.setText("Rate: 0.0%")
-        self.lbl_anomaly_count.setText("Anomalies: 0")
+        if active_tab == 1:
+            self._update_cores(data_list, rel)
+        elif active_tab == 2:
+            self._update_models(data_list, rel)
+        elif active_tab == 3:
+            self._update_latency(data_list)
+        elif active_tab == 4:
+            self._update_anomaly_table()
+
+        total = len(self.anomaly_log)
+        self.lbl_anomaly_count.setText(f"Anomalies: {total}")
 
     # ─────────────────────────────────────────────────────────────────────
     # Data ingestion
     # ─────────────────────────────────────────────────────────────────────
 
     def _on_new_data(self, data):
-        """Receive (timestamp, metrics, results) from collector thread."""
         ts, metrics, results = data
         self.buffer.append(data)
 
-        # Update latency history
         for r in results:
             self._latency_hist[r['name']].append(r['latency'])
 
-        # Check if any model flagged anomaly — use supermajority vote (>=60%)
-        # to reduce false positives from over-sensitive models like LOF
         anomaly_votes = sum(1 for r in results if r['pred'] == -1)
         is_anomaly    = anomaly_votes >= max(4, round(len(results) * 0.6))
 
         if is_anomaly:
-            # Build aggregate score (mean of individual scores)
             agg_score = np.mean([r['score'] for r in results])
             record = {
                 'time':        datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
@@ -493,44 +476,11 @@ class MainWindow(QMainWindow):
                 'gpu_memory':  metrics.get('gpu_memory', 0),
                 'gpu_temp':    metrics.get('gpu_temp', 0),
                 'agg_score':   agg_score,
-                'results':     results,   # per-model scores
+                'results':     results,
             }
-            self.anomaly_log.insert(0, record)   # newest first
+            self.anomaly_log.insert(0, record)
             if len(self.anomaly_log) > MAX_ANOMALY_ROWS:
                 self.anomaly_log.pop()
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Master refresh (called by QTimer every 200 ms)
-    # ─────────────────────────────────────────────────────────────────────
-
-    def _refresh(self):
-        if not self.buffer:
-            return
-        data_list  = list(self.buffer)
-        times      = [d[0] for d in data_list]
-        t0         = times[0]
-        rel        = [t - t0 for t in times]
-        active_tab = self.tabs.currentIndex()
-
-        # Always update system tab (low cost)
-        self._update_system(data_list, rel)
-
-        if active_tab == 1:
-            self._update_cores(data_list, rel)
-        elif active_tab == 2:
-            self._update_models(data_list, rel)
-        elif active_tab == 3:
-            self._update_latency(data_list)
-        elif active_tab == 4:
-            self._update_anomaly_table()
-
-        # Control bar counters (always)
-        total = len(self.anomaly_log)
-        self.lbl_anomaly_count.setText(f"Anomalies: {total}")
-
-    # ─────────────────────────────────────────────────────────────────────
-    # Tab update helpers
-    # ─────────────────────────────────────────────────────────────────────
 
     def _update_system(self, data_list, rel):
         cpu_pcts  = [d[1]['cpu_percent'] for d in data_list]
@@ -624,13 +574,11 @@ class MainWindow(QMainWindow):
         lat_dict = {r['name']: r['latency'] for r in latest_results}
         names    = [d[0] for d in self.detectors]
 
-        # ── Bar chart ─────────────────────────────────────────────────────
         max_lat = 0.001
         for i, name in enumerate(names):
             lat = lat_dict.get(name, 0)
             self._lat_bars[i].set_width(lat)
             max_lat = max(max_lat, lat)
-            # Colour by severity
             if lat > LAT_CRIT:
                 self._lat_bars[i].set_color('#dc2626')
             elif lat > LAT_WARN:
@@ -641,7 +589,6 @@ class MainWindow(QMainWindow):
         self.ax_lat_bar.set_xlim(0, max_lat * 1.2)
         self.canvas_lat_bar.draw_idle()
 
-        # ── Line chart (rolling history) ──────────────────────────────────
         for name, line in self._lat_history_lines.items():
             hist = list(self._latency_hist[name])
             if hist:
@@ -652,7 +599,6 @@ class MainWindow(QMainWindow):
             self.ax_lat_line.set_ylim(0, max(all_vals) * 1.15)
         self.canvas_lat_line.draw_idle()
 
-        # ── Stats table ───────────────────────────────────────────────────
         for i, name in enumerate(names):
             hist = list(self._latency_hist[name])
             lat  = lat_dict.get(name, 0)
@@ -668,7 +614,6 @@ class MainWindow(QMainWindow):
             self.lat_stats_table.setItem(i, 3, _item(f"{np.min(hist):.3f}"  if hist else "—"))
             self.lat_stats_table.setItem(i, 4, _item(f"{np.max(hist):.3f}"  if hist else "—"))
 
-            # Status cell with colour
             if lat > LAT_CRIT:
                 status, fg, bg = "SLOW",   "#7f1d1d", "#fee2e2"
             elif lat > LAT_WARN:
@@ -683,7 +628,7 @@ class MainWindow(QMainWindow):
             self.lat_stats_table.setItem(i, 5, status_item)
 
     def _update_anomaly_table(self):
-        """Rebuild anomaly table rows from self.anomaly_log."""
+        """Rebuild anomaly table rows with full model visibility."""
         n_models = len(self.detectors)
         model_names = [d[0] for d in self.detectors]
 
@@ -700,14 +645,12 @@ class MainWindow(QMainWindow):
                     it.setFont(QFont('Segoe UI', 8, QFont.Bold))
                 return it
 
-            # Fixed columns: indices 0 to 6
             self.anomaly_table.setItem(row, 0, _c(rec['time'], Qt.AlignCenter, bold=True))
             self.anomaly_table.setItem(row, 1, _c(f"{rec['cpu_percent']:.1f}%"))
             self.anomaly_table.setItem(row, 2, _c(f"{rec['cpu_temp']:.1f}°C"))
             self.anomaly_table.setItem(row, 3, _c(f"{rec['gpu_percent']:.1f}%"))
             self.anomaly_table.setItem(row, 4, _c(f"{rec['gpu_temp']:.1f}°C"))
 
-            # Aggregate score (column 5)
             score = rec['agg_score']
             score_item = _c(f"{score:.3f}", bold=True)
             if score < -0.5:
@@ -721,37 +664,22 @@ class MainWindow(QMainWindow):
                 score_item.setBackground(QBrush(QColor("#dbeafe")))
             self.anomaly_table.setItem(row, 5, score_item)
 
-            # Top cause (column 6) – hardware thresholds + model agreement fallback
             causes = []
-
-            # CPU usage (flag if notably elevated)
             if rec['cpu_percent'] > 70:
                 causes.append(f"cpu:{rec['cpu_percent']:.0f}%")
-            elif rec['cpu_percent'] > 40:
-                causes.append(f"cpu:{rec['cpu_percent']:.0f}%")
-            # CPU frequency throttling
             if rec.get('cpu_freq', 9999) < 1500:
                 causes.append(f"freq:{rec['cpu_freq']:.0f}MHz")
-            # RAM pressure
             if rec.get('cpu_memory', 0) > 75:
                 causes.append(f"ram:{rec['cpu_memory']:.0f}%")
-            # CPU temperature
             if rec['cpu_temp'] > 65:
                 causes.append(f"cpu_temp:{rec['cpu_temp']:.0f}°C")
-            # GPU usage
             if rec['gpu_percent'] > 60:
                 causes.append(f"gpu:{rec['gpu_percent']:.0f}%")
-            # GPU memory
-            if rec.get('gpu_memory', 0) > 70:
-                causes.append(f"gpu_mem:{rec['gpu_memory']:.0f}%")
-            # GPU temperature
-            if rec['gpu_temp'] > 65:
-                causes.append(f"gpu_temp:{rec['gpu_temp']:.0f}°C")
 
-            # Fallback: if no hardware threshold breached, show which models voted anomaly
             if not causes:
+                # Use full names for flagging models instead of .split()[0]
                 flagging = [
-                    r['name'].split()[0]   # first word of model name for brevity
+                    r['name']
                     for r in rec['results']
                     if r['pred'] == -1
                 ]
@@ -761,7 +689,6 @@ class MainWindow(QMainWindow):
             cause_txt = "  |  ".join(causes) if causes else "—"
             self.anomaly_table.setItem(row, 6, _c(cause_txt, Qt.AlignLeft))
 
-            # Per-model score columns (starting at column 7)
             for mi, mname in enumerate(model_names):
                 r = results_map.get(mname)
                 col = 7 + mi
@@ -775,16 +702,8 @@ class MainWindow(QMainWindow):
                         cell.setForeground(QBrush(QColor("#166534")))
                     self.anomaly_table.setItem(row, col, cell)
 
-            # Optional: highlight entire row if critical
-            if score < -0.5:
-                for col in range(self.anomaly_table.columnCount()):
-                    it = self.anomaly_table.item(row, col)
-                    if it and col not in (5, 6) and not it.background().color().isValid():
-                        it.setBackground(QBrush(QColor("#fff1f2")))
-
         self.anomaly_table.setSortingEnabled(True)
 
-        # Update summary labels
         total = len(self.anomaly_log)
         total_samples = len(self.buffer)
         rate = (total / total_samples * 100) if total_samples > 0 else 0.0
@@ -793,9 +712,6 @@ class MainWindow(QMainWindow):
         self.lbl_total_anomalies.setText(f"Total anomalies: {total}")
         self.lbl_last_anomaly.setText(f"Last anomaly: {last_time}")
         self.lbl_anomaly_rate.setText(f"Rate: {rate:.1f}%")
-    # ─────────────────────────────────────────────────────────────────────
-    # Export
-    # ─────────────────────────────────────────────────────────────────────
 
     def _export_anomaly_csv(self):
         if not self.anomaly_log:
@@ -821,34 +737,47 @@ class MainWindow(QMainWindow):
                 row[f"{r['name']}_pred"]  = r['pred']
             rows.append(row)
         pd.DataFrame(rows).to_csv(path, index=False)
-        print(f"[Export] Saved {len(rows)} anomaly records → {path}")
 
-    # ─────────────────────────────────────────────────────────────────────
-    # Cleanup
-    # ─────────────────────────────────────────────────────────────────────
+    def _start_collector(self):
+        self.collector = DataCollector(self.detectors)
+        self.collector.new_data.connect(self._on_new_data)
+        self._coll_thread = threading.Thread(
+            target=self.collector.run, daemon=True
+        )
+        self._coll_thread.start()
+
+    def toggle_collection(self):
+        if self.collecting:
+            self.collector.stop()
+            self.btn_pause.setText("▶  Resume")
+            self.lbl_status.setText("● Paused")
+            self.lbl_status.setStyleSheet("color:#d97706; font:9pt 'Segoe UI'; font-weight:bold;")
+            self.collecting = False
+        else:
+            self._start_collector()
+            self.btn_pause.setText("⏸  Pause")
+            self.lbl_status.setText("● Collecting")
+            self.lbl_status.setStyleSheet("color:#16a34a; font:9pt 'Segoe UI'; font-weight:bold;")
+            self.collecting = True
+
+    def clear_anomaly_log(self):
+        self.anomaly_log.clear()
+        self.anomaly_table.setRowCount(0)
+        self.lbl_total_anomalies.setText("Total anomalies: 0")
+        self.lbl_last_anomaly.setText("Last anomaly: —")
+        self.lbl_anomaly_rate.setText("Rate: 0.0%")
+        self.lbl_anomaly_count.setText("Anomalies: 0")
 
     def closeEvent(self, event):
         self.timer.stop()
         self.collector.stop()
         event.accept()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import os
-
-    print("Loading datasets …")
     normal_df        = pd.read_csv(NORMAL_DATA_PATH)
     labeled_train_df = pd.read_csv(LABELED_TRAIN_PATH)
-    labeled_train_df['label'] = labeled_train_df['label'].apply(
-        lambda x: 1 if x == 0 else -1
-    )
-    features = [
-        'cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
-        'gpu_percent', 'gpu_memory', 'gpu_temp',
-    ]
+    labeled_train_df['label'] = labeled_train_df['label'].apply(lambda x: 1 if x == 0 else -1)
+    features = ['cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp', 'gpu_percent', 'gpu_memory', 'gpu_temp']
 
     DETECTORS = [
         ('Isolation Forest',     IsolationForestDetector(),    False),
@@ -860,18 +789,11 @@ if __name__ == "__main__":
         ('RL Agent',             RLAgentDetector(),            True),
     ]
 
-    print("Training detectors …")
     for name, det, needs_labels in DETECTORS:
-        print(f"  {name} …", end=' ', flush=True)
-        try:
-            if needs_labels:
-                det.train(labeled_train_df[features], labeled_train_df['label'])
-            else:
-                det.train(normal_df[features])
-            print("✓")
-        except Exception as exc:
-            print(f"✗  {exc}")
-    print("Ready.\n")
+        if needs_labels:
+            det.train(labeled_train_df[features], labeled_train_df['label'])
+        else:
+            det.train(normal_df[features])
 
     app    = QApplication(sys.argv)
     window = MainWindow(DETECTORS)
