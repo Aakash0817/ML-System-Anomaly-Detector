@@ -474,9 +474,10 @@ class MainWindow(QMainWindow):
         for r in results:
             self._latency_hist[r['name']].append(r['latency'])
 
-        # Check if any model flagged anomaly — use majority vote
+        # Check if any model flagged anomaly — use supermajority vote (>=60%)
+        # to reduce false positives from over-sensitive models like LOF
         anomaly_votes = sum(1 for r in results if r['pred'] == -1)
-        is_anomaly    = anomaly_votes > len(results) / 2
+        is_anomaly    = anomaly_votes >= max(4, round(len(results) * 0.6))
 
         if is_anomaly:
             # Build aggregate score (mean of individual scores)
@@ -485,8 +486,11 @@ class MainWindow(QMainWindow):
                 'time':        datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
                 'timestamp':   ts,
                 'cpu_percent': metrics.get('cpu_percent', 0),
+                'cpu_freq':    metrics.get('cpu_freq', 0),
+                'cpu_memory':  metrics.get('cpu_memory', 0),
                 'cpu_temp':    metrics.get('cpu_temp', 0),
                 'gpu_percent': metrics.get('gpu_percent', 0),
+                'gpu_memory':  metrics.get('gpu_memory', 0),
                 'gpu_temp':    metrics.get('gpu_temp', 0),
                 'agg_score':   agg_score,
                 'results':     results,   # per-model scores
@@ -717,30 +721,42 @@ class MainWindow(QMainWindow):
                 score_item.setBackground(QBrush(QColor("#dbeafe")))
             self.anomaly_table.setItem(row, 5, score_item)
 
-            # Top cause (column 6) – generate meaningful description
+            # Top cause (column 6) – hardware thresholds + model agreement fallback
             causes = []
 
-            # CPU usage
-            if rec['cpu_percent'] > 60:
+            # CPU usage (flag if notably elevated)
+            if rec['cpu_percent'] > 70:
                 causes.append(f"cpu:{rec['cpu_percent']:.0f}%")
-            # CPU frequency (assume normal > 2000 MHz, adjust to your CPU)
-            if rec['cpu_freq'] < 1500:
-                causes.append(f"cpu_freq:{rec['cpu_freq']:.0f}MHz")
-            # CPU memory usage
-            if rec['cpu_memory'] > 80:
+            elif rec['cpu_percent'] > 40:
+                causes.append(f"cpu:{rec['cpu_percent']:.0f}%")
+            # CPU frequency throttling
+            if rec.get('cpu_freq', 9999) < 1500:
+                causes.append(f"freq:{rec['cpu_freq']:.0f}MHz")
+            # RAM pressure
+            if rec.get('cpu_memory', 0) > 75:
                 causes.append(f"ram:{rec['cpu_memory']:.0f}%")
             # CPU temperature
-            if rec['cpu_temp'] > 70:
+            if rec['cpu_temp'] > 65:
                 causes.append(f"cpu_temp:{rec['cpu_temp']:.0f}°C")
             # GPU usage
-            if rec['gpu_percent'] > 80:
+            if rec['gpu_percent'] > 60:
                 causes.append(f"gpu:{rec['gpu_percent']:.0f}%")
-            # GPU memory usage
-            if rec['gpu_memory'] > 80:
+            # GPU memory
+            if rec.get('gpu_memory', 0) > 70:
                 causes.append(f"gpu_mem:{rec['gpu_memory']:.0f}%")
             # GPU temperature
-            if rec['gpu_temp'] > 70:
+            if rec['gpu_temp'] > 65:
                 causes.append(f"gpu_temp:{rec['gpu_temp']:.0f}°C")
+
+            # Fallback: if no hardware threshold breached, show which models voted anomaly
+            if not causes:
+                flagging = [
+                    r['name'].split()[0]   # first word of model name for brevity
+                    for r in rec['results']
+                    if r['pred'] == -1
+                ]
+                if flagging:
+                    causes.append(f"models: {', '.join(flagging)}")
 
             cause_txt = "  |  ".join(causes) if causes else "—"
             self.anomaly_table.setItem(row, 6, _c(cause_txt, Qt.AlignLeft))

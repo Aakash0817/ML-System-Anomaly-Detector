@@ -1,0 +1,16 @@
+# Models
+*.pkl
+*.keras
+
+# Logs & data
+*.csv
+*.jsonl
+*.txt
+alerts.jsonl
+performance_log*
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
