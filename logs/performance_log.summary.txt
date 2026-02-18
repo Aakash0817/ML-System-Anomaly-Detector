@@ -1,0 +1,8 @@
+Log file      : logs\performance_log.csv
+Total rows    : 402
+Anomalies     : 208 (51.7%)
+Avg latency   : 1.00 ms
+P99 latency   : 1.00 ms
+Max latency   : 1.00 ms
+Mean score    : -0.0089
+Score std     : 0.2870
