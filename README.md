@@ -11,42 +11,53 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 
 ## 🖼️ Dashboard Screenshots
 
-The PyQt5 GUI is organized into tabs, each surfacing a different layer of monitoring data. Place your screenshots in the `docs/` folder and they will render here automatically.
+The PyQt5 GUI is organized into tabs, each surfacing a different layer of monitoring data.
 
-> **To add screenshots:** upload images to `docs/` on GitHub, then they appear below automatically.
+> **To add screenshots:** upload images to `docs/` on GitHub and they will render here automatically.
 
-### 1 · System Overview
-![System Overview](docs/screenshot.png)
-
-The main landing tab. Shows live gauges and numeric readouts for all seven monitored features — CPU usage, frequency, memory, and temperature alongside GPU load, memory, and temperature. Values update every second and color-code from green → amber → red as they climb.
-
----
-
-### 2 · Per-Core CPU Usage
-![Per-Core Usage](docs/Screenshot2.png)
-
-A bar chart that breaks total CPU utilization down by logical core, distinguishing between **P-cores** (Performance) and **E-cores** (Efficiency) on hybrid Intel architectures. Useful for spotting single-threaded bottlenecks or asymmetric load distribution that a rolled-up percentage would hide.
-
----
-
-### 3 · Model Score Timeline
-![Model Scores](docs/Screenshot3.png)
-
-A scrolling time-series chart plotting the raw anomaly score from each active detector. Normal samples cluster above zero; anomalous samples dip below. Watching multiple model lines simultaneously makes it easy to see when detectors agree (high confidence) versus when only one fires (investigate further before acting).
-
----
-
-### 4 · Latency & Performance Stats
-![Latency Stats](docs/Screenshot4.png)
-
-Live inference latency (ms) per detector, updated every sample. The panel also shows rolling average, P99, and max latency so you can spot when a detector starts taking longer than expected — a common early sign of memory pressure or I/O contention on the host machine.
-
----
-
-### 5 · Anomaly Event Log
-![Anomaly Log](docs/Screenshot5.png)
-
-A scrollable table of every anomaly fired during the session. Each row shows the timestamp, anomaly score, and a plain-English explanation of the **top three deviating features** with their observed value, rolling expected value, and z-score — for example: `gpu_memory: 14.2 (high, expected ≈9.4, z=1.9)`. Rows are color-coded by severity and can be exported for post-session review.
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshot.png" alt="System Overview" width="100%"/>
+      <br/>
+      <b>1 · System Overview</b>
+      <br/>
+      <sub>Live gauges for all 7 features — CPU usage, frequency, memory &amp; temperature plus GPU load, memory &amp; temperature. Color-codes green → amber → red as values climb.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/Screenshot2.png" alt="Per-Core CPU Usage" width="100%"/>
+      <br/>
+      <b>2 · Per-Core CPU Usage</b>
+      <br/>
+      <sub>Breaks utilization down by logical core, distinguishing P-cores (Performance) from E-cores (Efficiency) on hybrid Intel CPUs. Spots single-threaded bottlenecks a rolled-up % would hide.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/Screenshot3.png" alt="Model Score Timeline" width="100%"/>
+      <br/>
+      <b>3 · Model Score Timeline</b>
+      <br/>
+      <sub>Scrolling time-series of raw anomaly scores per detector. Normal samples sit above zero; anomalous samples dip below. Agreement across models signals high confidence.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/Screenshot4.png" alt="Latency & Performance Stats" width="100%"/>
+      <br/>
+      <b>4 · Latency &amp; Performance Stats</b>
+      <br/>
+      <sub>Per-detector inference latency with rolling average, P99, and max. Sudden spikes are an early indicator of memory pressure or I/O contention on the host.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <img src="docs/Screenshot5.png" alt="Anomaly Event Log" width="50%"/>
+      <br/>
+      <b>5 · Anomaly Event Log</b>
+      <br/>
+      <sub>Scrollable table of every alert with timestamp, score, and plain-English explanation of the top-3 deviating features — e.g. <code>gpu_memory: 14.2 (high, expected ≈9.4, z=1.9)</code>. Color-coded by severity.</sub>
+    </td>
+  </tr>
+</table>
 
 ---
 
