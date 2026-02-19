@@ -1,4 +1,4 @@
-# 🖥️ ML System Anomaly Detector
+#  ML System Anomaly Detector
 
 A real-time system monitoring tool that collects CPU/GPU hardware metrics and detects anomalies using an ensemble of machine learning models, with a live PyQt5 dashboard, desktop alerting, and detailed CSV logging.
 
@@ -81,7 +81,7 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 
 ---
 
-## ✨ Features
+##  Features
 
 - **Live hardware metrics** — CPU usage, frequency, memory, and temperature (via a non-blocking background WMI thread on Windows); GPU load, memory, and temperature via `GPUtil`
 - **8 anomaly detectors** — Isolation Forest, One-Class SVM, Local Outlier Factor, PCA Reconstruction, Random Forest, XGBoost, a neural-network RL agent, and a voting Ensemble
@@ -93,7 +93,7 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 
 ---
 
-## 🗂️ Project Structure
+##  Project Structure
 
 ```
 .
@@ -139,7 +139,7 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install dependencies
 
@@ -238,7 +238,7 @@ The `DriftDetector` runs a Page-Hinkley test on the anomaly score stream. When t
 
 ---
 
-## 📝 Logging & Performance Reports
+##  Logging & Performance Reports
 
 ### Runtime Log — `performance_log.csv`
 
@@ -339,7 +339,7 @@ The alerter enforces per-kind cooldowns so a sustained anomaly period doesn't fl
 
 ---
 
-## ⚙️ Configuration
+##  Configuration
 
 Key parameters are defined at the top of each module:
 
@@ -354,7 +354,7 @@ Key parameters are defined at the top of each module:
 
 ---
 
-## 📦 Requirements
+##  Requirements
 
 ```
 psutil
@@ -380,7 +380,7 @@ pip install -r requirements.txt
 
 ---
 
-## 💡 Key Learnings
+##  Key Learnings
 
 Building this project was a genuinely rewarding challenge. Applying ML to a **real-time system** is a different beast compared to working on static datasets — and that's what made it exciting.
 
@@ -398,7 +398,7 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 
 ---
 
-## 🤝 Contributing
+##  Contributing
 
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/my-detector`
@@ -411,14 +411,14 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 
 | Tool | Purpose |
 |---|---|
-| 🐍 Python | Core language |
-| 🧠 TensorFlow / Keras | RL agent neural network |
-| 🌲 scikit-learn | Isolation Forest, SVM, LOF, PCA, Random Forest |
-| ⚡ XGBoost | Gradient-boosted detector |
-| 🖥️ PyQt5 | Live dashboard GUI |
-| 📊 psutil + GPUtil | Hardware metric collection |
-| 📈 Matplotlib | Benchmark visualisations |
-| 🔔 plyer | Cross-platform desktop notifications |
+|  Python | Core language |
+|  TensorFlow / Keras | RL agent neural network |
+|  scikit-learn | Isolation Forest, SVM, LOF, PCA, Random Forest |
+|  XGBoost | Gradient-boosted detector |
+|  PyQt5 | Live dashboard GUI |
+|  psutil + GPUtil | Hardware metric collection |
+|  Matplotlib | Benchmark visualisations |
+|  plyer | Cross-platform desktop notifications |
 
 ---
 
