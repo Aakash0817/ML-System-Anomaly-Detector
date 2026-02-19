@@ -5,6 +5,48 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-latest-f7931e?logo=scikit-learn)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+---
+
+## 🖼️ Dashboard Screenshots
+
+The PyQt5 GUI is organized into tabs, each surfacing a different layer of monitoring data. Place your screenshots in the `docs/` folder and they will render here automatically.
+
+> **To add screenshots:** upload images to `docs/` on GitHub, then they appear below automatically.
+
+### 1 · System Overview
+![System Overview](docs/screenshot.png)
+
+The main landing tab. Shows live gauges and numeric readouts for all seven monitored features — CPU usage, frequency, memory, and temperature alongside GPU load, memory, and temperature. Values update every second and color-code from green → amber → red as they climb.
+
+---
+
+### 2 · Per-Core CPU Usage
+![Per-Core Usage](docs/Screenshot2.png)
+
+A bar chart that breaks total CPU utilization down by logical core, distinguishing between **P-cores** (Performance) and **E-cores** (Efficiency) on hybrid Intel architectures. Useful for spotting single-threaded bottlenecks or asymmetric load distribution that a rolled-up percentage would hide.
+
+---
+
+### 3 · Model Score Timeline
+![Model Scores](docs/Screenshot3.png)
+
+A scrolling time-series chart plotting the raw anomaly score from each active detector. Normal samples cluster above zero; anomalous samples dip below. Watching multiple model lines simultaneously makes it easy to see when detectors agree (high confidence) versus when only one fires (investigate further before acting).
+
+---
+
+### 4 · Latency & Performance Stats
+![Latency Stats](docs/Screenshot4.png)
+
+Live inference latency (ms) per detector, updated every sample. The panel also shows rolling average, P99, and max latency so you can spot when a detector starts taking longer than expected — a common early sign of memory pressure or I/O contention on the host machine.
+
+---
+
+### 5 · Anomaly Event Log
+![Anomaly Log](docs/Screenshot5.png)
+
+A scrollable table of every anomaly fired during the session. Each row shows the timestamp, anomaly score, and a plain-English explanation of the **top three deviating features** with their observed value, rolling expected value, and z-score — for example: `gpu_memory: 14.2 (high, expected ≈9.4, z=1.9)`. Rows are color-coded by severity and can be exported for post-session review.
 
 ---
 
@@ -186,6 +228,107 @@ The `DriftDetector` runs a Page-Hinkley test on the anomaly score stream. When t
 
 ---
 
+## 📝 Logging & Performance Reports
+
+### Runtime Log — `performance_log.csv`
+
+Every sample written by the monitor is appended to `performance_log.csv` in real time. The logger is thread-safe, flushes to disk every 10 rows, and registers an `atexit` handler so the file is always closed cleanly even if the application crashes.
+
+| Column | Type | Description |
+|---|---|---|
+| `timestamp` | float | Unix epoch of the sample |
+| `elapsed_s` | float | Seconds since the logger was opened |
+| `cpu_percent` | float | Overall CPU utilisation (%) |
+| `cpu_freq` | float | Current CPU frequency (MHz) |
+| `cpu_memory` | float | RAM utilisation (%) |
+| `cpu_temp` | float | CPU package temperature (°C) |
+| `gpu_percent` | float | GPU load (%) |
+| `gpu_memory` | float | GPU memory utilisation (%) |
+| `gpu_temp` | float | GPU temperature (°C) |
+| `anomaly` | int | Detector verdict: `1` = normal, `-1` = anomaly |
+| `score` | float | Raw decision-function score (negative = more anomalous) |
+| `inference_latency_ms` | float | Time taken for model inference (ms) |
+| `jitter_ms` | float | Deviation from the ideal 1-second sample interval (ms) |
+| `drift_detected` | int | `1` if Page-Hinkley drift flag is raised, else `0` |
+
+**Sample session stats** (from a real ~7-minute run):
+
+| Metric | Value |
+|---|---|
+| Total samples | 402 |
+| Anomalies detected | 208 (51.7%) |
+| Avg inference latency | 1.00 ms |
+| P99 / Max latency | 1.00 ms / 1.00 ms |
+| Mean anomaly score | −0.0089 |
+| Score std deviation | 0.2870 |
+| Session duration | ~6.7 minutes |
+| Drift events | 0 |
+
+> A 51.7% anomaly rate during this particular session reflects an active stress-test period during labeled data collection — in normal idle use the rate is considerably lower.
+
+### Summary Report — `performance_log.summary.txt`
+
+When the logger closes (on clean exit or `atexit`), it writes a companion summary file alongside the CSV:
+
+```
+Log file      : logs\performance_log.csv
+Total rows    : 402
+Anomalies     : 208 (51.7%)
+Avg latency   : 1.00 ms
+P99 latency   : 1.00 ms
+Max latency   : 1.00 ms
+Mean score    : -0.0089
+Score std     : 0.2870
+```
+
+### Alert Log — `alerts.jsonl`
+
+Every alert fired by the `Alerter` is appended to `alerts.jsonl` as a newline-delimited JSON record. The file survives across sessions and is never truncated, making it a durable audit trail.
+
+**Record schema:**
+
+```jsonc
+{
+  "time":        "2026-02-18T09:39:55.515272",   // ISO-8601 local time
+  "kind":        "anomaly",                        // "anomaly" | "drift"
+  "score":       -0.4734,                          // raw decision score
+  "explanation": [                                 // top-3 deviating features
+    "gpu_memory: 8.0 (high, expected ≈6.6, z=25.5)",
+    "gpu_temp: 42.0 (high, expected ≈40.1, z=6.9)",
+    "cpu_memory: 43.6 (high, expected ≈42.8, z=4.4)"
+  ],
+  "metrics": {                                     // raw feature snapshot
+    "cpu_percent": 35.5,
+    "cpu_freq": 3100.0,
+    "cpu_memory": 43.6,
+    "cpu_temp": 54.26,
+    "gpu_percent": 12.0,
+    "gpu_memory": 8.03,
+    "gpu_temp": 42.0
+  }
+}
+```
+
+**Stats from a real session (234 alerts over ~55 minutes):**
+
+| Metric | Value |
+|---|---|
+| Total alerts | 234 |
+| Alert types | anomaly: 234, drift: 0 |
+| Score range | −0.499 to −0.002 |
+| Most flagged feature | `gpu_temp` (130×) |
+| Second most flagged | `cpu_temp` (115×) |
+| Third most flagged | `gpu_memory` (94×) |
+| Session window | 09:38 → 10:33 |
+
+The explainer starts with `"Insufficient baseline data"` for the first ~30 samples while the rolling stats window fills, then switches to per-feature z-score attribution automatically.
+
+### Cooldown & Deduplication
+
+The alerter enforces per-kind cooldowns so a sustained anomaly period doesn't flood the log — anomaly alerts fire at most once every `cooldown_s` seconds (default 10 s), and drift alerts at most once every `cooldown_s × 6` seconds (default 60 s). All records still appear in `alerts.jsonl`; the cooldown only gates desktop notifications and terminal output.
+
+---
+
 ## ⚙️ Configuration
 
 Key parameters are defined at the top of each module:
@@ -236,3 +379,7 @@ pip install -r requirements.txt
 5. Open a pull request
 
 ---
+
+## 📄 License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
