@@ -387,7 +387,7 @@ Building this project was a genuinely rewarding challenge. Applying ML to a **re
 
 A few things that stood out:
 
-- **Real-time systems demand different thinking.** Every design decision — from the background temperature thread to the non-blocking alerter — had to account for timing, jitter, and the fact that a slow read blocks everything downstream. Static ML pipelines don't prepare you for that.
+- **Real-time systems demand different thinking.** Every design decision - from the background temperature thread to the non-blocking alerter — had to account for timing, jitter, and the fact that a slow read blocks everything downstream. Static ML pipelines don't prepare you for that.
 
 - **ML on live hardware data is tougher than it looks.** Sensor noise, sudden CPU frequency drops, GPU memory spikes from unrelated background apps — all of it looks like an anomaly to a model that was trained on clean data. Getting the balance between sensitivity and false-positive rate right required a lot of iteration.
 
