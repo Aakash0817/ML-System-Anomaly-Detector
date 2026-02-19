@@ -5,6 +5,8 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-latest-f7931e?logo=scikit-learn)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 ---
 
 ## 🖼️ Dashboard Screenshots
@@ -379,6 +381,24 @@ pip install -r requirements.txt
 
 ---
 
+## 💡 Key Learnings
+
+Building this project was a genuinely rewarding challenge. Applying ML to a **real-time system** is a different beast compared to working on static datasets — and that's what made it exciting.
+
+A few things that stood out:
+
+- **Real-time systems demand different thinking.** Every design decision — from the background temperature thread to the non-blocking alerter — had to account for timing, jitter, and the fact that a slow read blocks everything downstream. Static ML pipelines don't prepare you for that.
+
+- **ML on live hardware data is tougher than it looks.** Sensor noise, sudden CPU frequency drops, GPU memory spikes from unrelated background apps — all of it looks like an anomaly to a model that was trained on clean data. Getting the balance between sensitivity and false-positive rate right required a lot of iteration.
+
+- **Unsupervised vs supervised is a real trade-off here.** Isolation Forest and One-Class SVM need no labels but struggle with precision. XGBoost and Random Forest perform significantly better — but only if you've collected good labeled data, which itself requires deliberate effort (hence `collect_labeled.py`).
+
+- **The explainability layer matters more than expected.** Knowing the model flagged something is useful. Knowing *why* — `gpu_memory: 14.2 (high, expected ≈9.4, z=1.9)` — is what actually helps you act on it.
+
+Overall, this project gave me hands-on insight into the gap between "ML that works on paper" and "ML that works on a live system" — and bridging that gap is where the real engineering lives.
+
+---
+
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -389,4 +409,31 @@ pip install -r requirements.txt
 
 ---
 
-Made with ❤️ by Aakash0817
+## 📄 License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## 🛠️ Built With
+
+| Tool | Purpose |
+|---|---|
+| 🐍 Python | Core language |
+| 🧠 TensorFlow / Keras | RL agent neural network |
+| 🌲 scikit-learn | Isolation Forest, SVM, LOF, PCA, Random Forest |
+| ⚡ XGBoost | Gradient-boosted detector |
+| 🖥️ PyQt5 | Live dashboard GUI |
+| 📊 psutil + GPUtil | Hardware metric collection |
+| 📈 Matplotlib | Benchmark visualisations |
+| 🔔 plyer | Cross-platform desktop notifications |
+
+---
+
+<div align="center">
+
+Made with ❤️ by [Aakash0817](https://github.com/Aakash0817)
+
+*If you found this project useful, consider giving it a ⭐ on GitHub!*
+
+</div>
