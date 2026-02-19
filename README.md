@@ -5,7 +5,6 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-latest-f7931e?logo=scikit-learn)
-![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
@@ -237,7 +236,3 @@ pip install -r requirements.txt
 5. Open a pull request
 
 ---
-
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
