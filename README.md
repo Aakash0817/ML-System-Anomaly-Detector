@@ -426,6 +426,4 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 
 Made with ❤️ by [Aakash0817](https://github.com/Aakash0817)
 
-*If you found this project useful, consider giving it a ⭐ on GitHub!*
-
 </div>
