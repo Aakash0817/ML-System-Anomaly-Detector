@@ -5,7 +5,7 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 ![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-latest-f7931e?logo=scikit-learn)
-![License](https://img.shields.io/badge/License-MIT-green)
+
 
 ---
 
@@ -13,7 +13,6 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 
 The PyQt5 GUI is organized into tabs, each surfacing a different layer of monitoring data.
 
-> **To add screenshots:** upload images to `docs/` on GitHub and they will render here automatically.
 
 <table>
   <tr>
@@ -407,13 +406,6 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 4. Register it in `comparison.py` and `monitor.py`
 5. Open a pull request
 
----
-
-## 📄 License
-
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
-
----
 
 ## 🛠️ Built With
 
