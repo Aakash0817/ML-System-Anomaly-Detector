@@ -9,7 +9,7 @@ A real-time system monitoring tool that collects CPU/GPU hardware metrics and de
 
 ---
 
-## 🖼️ Dashboard Screenshots
+##  Dashboard Screenshots
 
 The PyQt5 GUI is organized into tabs, each surfacing a different layer of monitoring data.
 
@@ -60,7 +60,7 @@ The PyQt5 GUI is organized into tabs, each surfacing a different layer of monito
 
 ---
 
-## 📊 Benchmark Results
+##  Benchmark Results
 
 All eight detectors were evaluated on the same labeled test set. Supervised models (XGBoost, Random Forest) achieved the highest F1 scores, while One-Class SVM led among unsupervised methods on ROC-AUC.
 
@@ -203,7 +203,7 @@ python monitor.py
 
 ---
 
-## 🧠 How It Works
+##  How It Works
 
 ### Data Collection
 
@@ -407,7 +407,7 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 5. Open a pull request
 
 
-## 🛠️ Built With
+##  Built With
 
 | Tool | Purpose |
 |---|---|
