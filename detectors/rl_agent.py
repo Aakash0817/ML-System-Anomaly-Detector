@@ -4,6 +4,7 @@ rl_agent.py
 Detector wrapper for the trained Keras classifier (RL agent).
 """
 
+import time                     # ← new import
 import joblib
 import numpy as np
 import tensorflow as tf
@@ -23,10 +24,7 @@ class RLAgentDetector:
         self.feature_order = FEATURES
 
     def train(self, X=None, y=None):
-        """
-        Pre-trained model is already loaded – nothing to do.
-        This method exists only to satisfy the training call in monitor.py.
-        """
+        """Pre-trained model is already loaded – nothing to do."""
         pass
 
     def predict(self, features: dict):
@@ -34,8 +32,10 @@ class RLAgentDetector:
         Returns:
             pred:  1 = normal, -1 = anomaly
             score: probability of anomaly (0..1)
-            latency: dummy 0.0 (can be extended)
+            latency: inference time in milliseconds
         """
+        start = time.perf_counter()          # ← start timer
+
         # Build feature vector in correct order
         X = np.array([[features[f] for f in self.feature_order]])
         X_scaled = self.scaler.transform(X)
@@ -47,7 +47,6 @@ class RLAgentDetector:
         # Convert to -1/1 prediction (threshold at 0.5)
         pred = -1 if score > 0.5 else 1
 
-        # Latency (you can measure if needed, but 0 is fine for now)
-        latency = 0.0
+        latency = (time.perf_counter() - start) * 1000   # ← elapsed ms
 
         return pred, score, latency

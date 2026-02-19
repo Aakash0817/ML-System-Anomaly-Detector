@@ -693,7 +693,7 @@ class MainWindow(QMainWindow):
                 r = results_map.get(mname)
                 col = 7 + mi
                 if r:
-                    cell = _c(f"{r['score']:.3f}")
+                    cell = _c(f"{r['score']:.5f}")
                     if r['pred'] == -1:
                         cell.setBackground(QBrush(QColor("#fee2e2")))
                         cell.setForeground(QBrush(QColor("#991b1b")))

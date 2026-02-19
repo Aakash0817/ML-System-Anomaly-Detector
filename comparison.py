@@ -32,7 +32,7 @@ from detectors.local_outlier import LocalOutlierFactorDetector
 from detectors.pca_reconstruction import PCADetector
 from detectors.random_forest import RandomForestDetector
 from detectors.xgboost_detector import XGBoostDetector
-from detectors.rl_agent import RLAgentDetector, RLAgentDetectorQuantized
+from detectors.rl_agent import RLAgentDetector
 from detectors.ensemble_detector import EnsembleDetector
 from detectors.base import FEATURE_ORDER
 
@@ -74,7 +74,6 @@ DETECTORS = [
     ('Random Forest',       RandomForestDetector(),          True),
     ('XGBoost',             XGBoostDetector(),               True),
     ('RL Agent',            RLAgentDetector(),               False),
-    ('RL Agent (Quantized)', RLAgentDetectorQuantized(),      False),
     ('Ensemble',            EnsembleDetector(_ens_members),  True),   # needs labels for RF/XGB sub-members
 ]
 
