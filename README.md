@@ -424,6 +424,6 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 
 <div align="center">
 
-Made with ❤️ by [Aakash0817](https://github.com/Aakash0817)
+Made with ❤️  by [Aakash0817](https://github.com/Aakash0817)
 
 </div>
