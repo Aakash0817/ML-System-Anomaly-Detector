@@ -41,6 +41,29 @@ LABELED_TRAIN_PATH = 'data/labeled_training.csv'
 LAT_WARN  = 10.0
 LAT_CRIT  = 50.0
 
+# A detector that raises this many times in a row is taken out of service.
+MAX_CONSECUTIVE_FAILURES = 3
+
+
+class DetectorState:
+    """Health of one detector, preserved across pause/resume cycles."""
+
+    def __init__(self, name):
+        self.name = name
+        self.consecutive_failures = 0
+        self.disabled = False
+        self.last_error = None
+
+    def record_success(self):
+        self.consecutive_failures = 0
+
+    def record_failure(self, exc):
+        self.consecutive_failures += 1
+        self.last_error = f"{type(exc).__name__}: {exc}"
+        if self.consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+            self.disabled = True
+        return self.disabled
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DataCollector worker
@@ -53,9 +76,10 @@ class DataCollector(QObject):
     """
     new_data = pyqtSignal(object)
 
-    def __init__(self, detectors):
+    def __init__(self, detectors, state):
         super().__init__()
         self.detectors = detectors
+        self.state     = state          # {name: DetectorState}, owned by MainWindow
         self.running   = True
 
     def run(self):
@@ -63,19 +87,54 @@ class DataCollector(QObject):
             metrics = collect_all_metrics()
             results = []
             for name, det, _ in self.detectors:
+                st = self.state[name]
+
+                if st.disabled:
+                    results.append(self._failed(name, st, disabled=True))
+                    continue
+
                 try:
                     pred, score, lat = det.predict(metrics)
                 except Exception as exc:
-                    print(f"[{name}] predict error: {exc}")
-                    pred, score, lat = 1, 0.0, 0.0
+                    now_disabled = st.record_failure(exc)
+                    if now_disabled:
+                        print(f"[{name}] DISABLED after "
+                              f"{MAX_CONSECUTIVE_FAILURES} consecutive failures: "
+                              f"{st.last_error}", flush=True)
+                    else:
+                        print(f"[{name}] predict failed "
+                              f"({st.consecutive_failures}/"
+                              f"{MAX_CONSECUTIVE_FAILURES}): {st.last_error}",
+                              flush=True)
+                    results.append(self._failed(name, st, disabled=now_disabled))
+                    continue
+
+                st.record_success()
                 results.append({
                     'name':    name,
                     'pred':    pred,
                     'score':   score,
                     'latency': lat,
+                    'ok':      True,
+                    'disabled': False,
+                    'error':   None,
                 })
             self.new_data.emit((time.time(), metrics, results))
             time.sleep(SAMPLE_INTERVAL)
+
+    @staticmethod
+    def _failed(name, st, disabled):
+        """Result for a detector that produced no reading. Values are None,
+        never 0.0 — a zero score is a legitimate reading."""
+        return {
+            'name':    name,
+            'pred':    None,
+            'score':   None,
+            'latency': None,
+            'ok':      False,
+            'disabled': disabled,
+            'error':   st.last_error,
+        }
 
     def stop(self):
         self.running = False
@@ -105,6 +164,8 @@ class MainWindow(QMainWindow):
     def __init__(self, detectors):
         super().__init__()
         self.detectors     = detectors          # [(name, det, needs_labels), ...]
+        self.detector_state = {name: DetectorState(name)
+                               for name, _, _ in detectors}
         self.buffer        = deque(maxlen=BUFFER_SIZE)
         self.anomaly_log   = []                 # list of dicts for Anomaly tab
         self._latency_hist = {                  # rolling history per model
@@ -158,6 +219,8 @@ class MainWindow(QMainWindow):
         self.lbl_status.setStyleSheet("color: #16a34a; font: 9pt 'Segoe UI'; font-weight: bold;")
         self.lbl_anomaly_count = QLabel("Anomalies: 0")
         self.lbl_anomaly_count.setStyleSheet("color: #dc2626; font: 9pt 'Segoe UI';")
+        self.lbl_detector_health = QLabel("Detectors: —")
+        self.lbl_detector_health.setStyleSheet("color: #6b7280; font: 9pt 'Segoe UI';")
 
         bar.addWidget(self.btn_pause)
         bar.addWidget(self.btn_clear)
@@ -165,6 +228,7 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.lbl_status)
         bar.addSpacing(16)
         bar.addWidget(self.lbl_anomaly_count)
+        bar.addWidget(self.lbl_detector_health)
         bar.addStretch()
         root.addLayout(bar)
 
@@ -449,6 +513,7 @@ class MainWindow(QMainWindow):
 
         total = len(self.anomaly_log)
         self.lbl_anomaly_count.setText(f"Anomalies: {total}")
+        self._refresh_detector_health()
 
     # ─────────────────────────────────────────────────────────────────────
     # Data ingestion
@@ -459,13 +524,16 @@ class MainWindow(QMainWindow):
         self.buffer.append(data)
 
         for r in results:
-            self._latency_hist[r['name']].append(r['latency'])
+            if r['ok']:
+                self._latency_hist[r['name']].append(r['latency'])
 
-        anomaly_votes = sum(1 for r in results if r['pred'] == -1)
-        is_anomaly    = anomaly_votes >= max(4, round(len(results) * 0.6))
+        healthy       = [r for r in results if r['ok']]
+        anomaly_votes = sum(1 for r in healthy if r['pred'] == -1)
+        is_anomaly    = (len(healthy) >= 4
+                         and anomaly_votes >= max(4, round(len(healthy) * 0.6)))
 
         if is_anomaly:
-            agg_score = np.mean([r['score'] for r in results])
+            agg_score = np.mean([r['score'] for r in healthy])
             record = {
                 'time':        datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
                 'timestamp':   ts,
@@ -482,6 +550,31 @@ class MainWindow(QMainWindow):
             self.anomaly_log.insert(0, record)
             if len(self.anomaly_log) > MAX_ANOMALY_ROWS:
                 self.anomaly_log.pop()
+
+    def _refresh_detector_health(self):
+        """Name every detector that is failing or out of service."""
+        disabled = [n for n, st in self.detector_state.items() if st.disabled]
+        failing  = [n for n, st in self.detector_state.items()
+                    if not st.disabled and st.consecutive_failures > 0]
+        total    = len(self.detector_state)
+        healthy  = total - len(disabled) - len(failing)
+
+        parts = [f"Detectors: {healthy}/{total} OK"]
+        if failing:
+            parts.append("failing: " + ", ".join(sorted(failing)))
+        if disabled:
+            parts.append("DISABLED: " + ", ".join(sorted(disabled)))
+        self.lbl_detector_health.setText("   |   ".join(parts))
+
+        if disabled:
+            colour = "#dc2626"
+        elif failing:
+            colour = "#d97706"
+        else:
+            colour = "#6b7280"
+        self.lbl_detector_health.setStyleSheet(
+            f"color: {colour}; font: 9pt 'Segoe UI'; font-weight: bold;"
+        )
 
     def _update_system(self, data_list, rel):
         cpu_pcts  = [d[1]['cpu_percent'] for d in data_list]
@@ -554,7 +647,7 @@ class MainWindow(QMainWindow):
                 r['score']
                 for d in data_list
                 for r in d[2]
-                if r['name'] == name
+                if r['name'] == name and r['ok']
             ]
             if not scores:
                 continue
@@ -572,12 +665,18 @@ class MainWindow(QMainWindow):
             return
 
         latest_results = data_list[-1][2]
-        lat_dict = {r['name']: r['latency'] for r in latest_results}
-        names    = [d[0] for d in self.detectors]
+        lat_dict    = {r['name']: r['latency'] for r in latest_results}
+        failed_dict = {r['name']: (not r['ok']) for r in latest_results}
+        names       = [d[0] for d in self.detectors]
 
         max_lat = 0.001
         for i, name in enumerate(names):
-            lat = lat_dict.get(name, 0)
+            if failed_dict.get(name):
+                # No reading this sample: no bar, greyed out.
+                self._lat_bars[i].set_width(0)
+                self._lat_bars[i].set_color('#9ca3af')
+                continue
+            lat = lat_dict.get(name) or 0
             self._lat_bars[i].set_width(lat)
             max_lat = max(max_lat, lat)
             if lat > LAT_CRIT:
@@ -594,7 +693,8 @@ class MainWindow(QMainWindow):
             hist = list(self._latency_hist[name])
             if hist:
                 line.set_data(range(len(hist)), hist)
-        all_vals = [v for h in self._latency_hist.values() for v in h if v > 0]
+        all_vals = [v for h in self._latency_hist.values()
+                    for v in h if v is not None and v > 0]
         if all_vals:
             self.ax_lat_line.set_xlim(0, BUFFER_SIZE)
             self.ax_lat_line.set_ylim(0, max(all_vals) * 1.15)
@@ -740,7 +840,7 @@ class MainWindow(QMainWindow):
         pd.DataFrame(rows).to_csv(path, index=False)
 
     def _start_collector(self):
-        self.collector = DataCollector(self.detectors)
+        self.collector = DataCollector(self.detectors, self.detector_state)
         self.collector.new_data.connect(self._on_new_data)
         self._coll_thread = threading.Thread(
             target=self.collector.run, daemon=True
