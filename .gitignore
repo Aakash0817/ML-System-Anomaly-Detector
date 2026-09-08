@@ -1,16 +1,52 @@
-# Models
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Editors / IDEs
+.idea/
+*.iml
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Type checking / linting / test caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment / secrets
+.env
+*.env
+
+# Trained model artifacts
 *.pkl
 *.keras
+*.h5
+*.pt
+*.pth
+*.joblib
 
-# Logs & data
-*.csv
+# Runtime logs and captured metrics
+logs/
 *.jsonl
-*.txt
-alerts.jsonl
 performance_log*
-
-# Python
-__pycache__/
-*.pyc
-.env
-venv/
