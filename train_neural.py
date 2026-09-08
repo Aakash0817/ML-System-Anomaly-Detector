@@ -15,6 +15,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 
 from seeds import SEED, set_global_seeds
+from console import enable_unicode_output
+
+enable_unicode_output()
 
 # Seed before the model is built: controls weight initialisation,
 # dropout masks and the shuffling inside model.fit().

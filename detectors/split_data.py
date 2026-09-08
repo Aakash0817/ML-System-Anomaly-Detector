@@ -21,6 +21,9 @@ from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from seeds import SEED
+from console import enable_unicode_output
+
+enable_unicode_output()
 
 DATA_DIR = Path('data')
 RAW_PATH = DATA_DIR / 'labeled_raw.csv'

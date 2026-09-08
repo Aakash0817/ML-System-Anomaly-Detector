@@ -15,10 +15,9 @@ import time
 from pathlib import Path
 import numpy as np
 
-FEATURE_ORDER = [
-    'cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
-    'gpu_percent', 'gpu_memory', 'gpu_temp',
-]
+# Single source of truth: a second hand-maintained copy of this list could
+# drift out of order and silently mislabel every column in the log.
+from detectors.base import FEATURE_ORDER
 
 AGGREGATE_COLUMNS = [
     'anomaly', 'score', 'inference_latency_ms', 'jitter_ms',

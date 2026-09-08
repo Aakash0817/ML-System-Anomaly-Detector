@@ -15,7 +15,6 @@ Includes:
 import joblib
 import time
 import os
-import atexit
 import numpy as np
 import pandas as pd
 from collections import deque

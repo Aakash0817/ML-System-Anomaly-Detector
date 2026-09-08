@@ -68,14 +68,14 @@ All eight configurations evaluated on the same held-out test set
 
 | Detector | F1 | ROC-AUC | Precision | Recall | Latency (ms) |
 |---|---|---|---|---|---|
-| XGBoost | 0.9464 | 0.9741 | 0.9815 | 0.9138 | 0.184 |
-| Random Forest | 0.9369 | 0.9752 | 0.9811 | 0.8966 | 37.303 |
-| Neural Detector | 0.9286 | 0.9440 | 0.9630 | 0.8966 | 91.794 |
-| Ensemble | 0.8983 | 0.8761 | 0.8833 | 0.9138 | 61.019 |
-| Isolation Forest | 0.8571 | 0.8825 | 0.8361 | 0.8793 | 7.575 |
-| One-Class SVM | 0.8413 | 0.9305 | 0.7794 | 0.9138 | 1.170 |
-| PCA Reconstruction | 0.8116 | 0.6352 | 0.7000 | 0.9655 | 0.175 |
-| Local Outlier Factor | 0.7328 | 0.5005 | 0.6575 | 0.8276 | 30.239 |
+| XGBoost | 0.9464 | 0.9741 | 0.9815 | 0.9138 | 0.429 |
+| Random Forest | 0.9369 | 0.9752 | 0.9811 | 0.8966 | 44.755 |
+| Neural Detector | 0.9286 | 0.9440 | 0.9630 | 0.8966 | 151.633 |
+| Ensemble | 0.9204 | 0.8788 | 0.9455 | 0.8966 | 257.231 |
+| Isolation Forest | 0.8571 | 0.8825 | 0.8361 | 0.8793 | 9.706 |
+| One-Class SVM | 0.8413 | 0.9305 | 0.7794 | 0.9138 | 1.150 |
+| PCA Reconstruction | 0.8116 | 0.6315 | 0.7000 | 0.9655 | 0.148 |
+| Local Outlier Factor | 0.7328 | 0.5005 | 0.6575 | 0.8276 | 25.171 |
 
 ![Comparison Plot](comparison_plots.png)
 
@@ -113,9 +113,27 @@ value. GPU failures also set `gpu_available` to `False`. CPU temperature is
 reported as `None` when no read has succeeded or the last good read is more than
 10 seconds old. Each distinct failure reason is logged once, not once per sample.
 
+A `None` never reaches a model. The collector substitutes the median of that
+feature over `normal_training.csv` before predicting, and keeps the raw `None`
+for the plots and the log.
+
+This matters on any machine without an OpenHardwareMonitor temperature source
+or a GPUtil-visible GPU. Passed through raw, a missing reading makes One-Class
+SVM, LOF, PCA and XGBoost raise on every sample — all four are disabled within
+three seconds, leaving three healthy detectors, below the four needed for a
+verdict — so no anomaly is ever reported again for the rest of the session.
+Isolation Forest, Random Forest and the neural network are worse still: they
+accept the `NaN` and score it without complaint.
+
 **Scoring.** Seven detectors score every sample independently. All use the same
 convention: a higher score means more normal, and `pred` is `1` for normal,
 `-1` for anomaly.
+
+Isolation Forest, One-Class SVM and LOF report their estimator's raw decision
+function, so their magnitude is only loosely bounded. Random Forest, XGBoost,
+the neural detector and PCA are mapped onto `[-1, 1]`. That matters because
+`EnsembleDetector` and the monitor's aggregate both *average* these scores: a
+detector whose scale runs away decides the average on its own.
 
 **Detector health.** A detector that raises is recorded as failed for that
 sample — score, latency and prediction are `None`, not `0.0` — and is excluded
@@ -204,6 +222,16 @@ Collects for 30 seconds with no GUI, then checks that the log has rows, that
 latencies are not all identical, that the aggregate score is not constant, and
 that every detector produced a varying score. Exits non-zero if any check fails.
 
+### 8. Test suite
+
+```bash
+python -m pytest tests/
+```
+
+Regression tests for the detector contract, the ensemble vote, the handling of
+missing sensor readings and the CSV schema. Tests that need `tensorflow` or
+`xgboost` skip when those are not installed.
+
 ---
 
 ## Log Schema
@@ -241,8 +269,13 @@ that every detector produced a varying score. Exits non-zero if any check fails.
 │   ├── xgboost_detector.py
 │   ├── neural_detector.py
 │   ├── ensemble_detector.py
-│   ├── split_data.py               # Stratified train/test split
-│   └── test.py                     # Manual scaler/model sanity check
+│   └── split_data.py               # Stratified train/test split
+│
+├── scripts/
+│   └── check_neural_model.py       # Manual scaler/model sanity check
+│
+├── tests/
+│   └── test_detectors.py           # Regression tests (pytest)
 │
 ├── data/                           # Created by the collection scripts
 │   ├── normal_training.csv
@@ -253,6 +286,7 @@ that every detector produced a varying score. Exits non-zero if any check fails.
 ├── monitor.py                      # GUI application, entry point, --selftest
 ├── data_collector.py               # Hardware metric collection
 ├── logger.py                       # Thread-safe CSV logger
+├── console.py                      # UTF-8 console output
 ├── anomaly_detector.py             # RunningStats, AnomalyExplainer, DriftDetector
 ├── seeds.py                        # Central random seed control
 │

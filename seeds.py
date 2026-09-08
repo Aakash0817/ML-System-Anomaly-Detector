@@ -4,7 +4,7 @@ seeds.py
 Central random-seed control so training and benchmark runs are reproducible.
 
 Call set_global_seeds() once at the start of any entry point that trains a
-model or splits data (comparison.py, monitor.py, train_rl.py). Estimators
+model or splits data (comparison.py, monitor.py, train_neural.py). Estimators
 that expose their own seed parameter also set it explicitly, so a detector
 stays reproducible even when constructed directly.
 

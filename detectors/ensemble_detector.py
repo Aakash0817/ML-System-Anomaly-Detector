@@ -12,8 +12,11 @@ Key properties
 • Implements save/load by delegating to each sub-detector.
 """
 
+import json
+import os
 import time
-import numpy as np
+
+import joblib
 from .base import BaseDetector, FEATURE_ORDER
 
 
@@ -144,7 +147,6 @@ class EnsembleDetector(BaseDetector):
         """
         Save each sub-detector to <directory>/<name>.pkl (or .model).
         """
-        import os, joblib
         os.makedirs(directory, exist_ok=True)
         for name, det in self.detectors:
             safe_name = name.replace(' ', '_').lower()
@@ -155,28 +157,37 @@ class EnsembleDetector(BaseDetector):
             except Exception as exc:
                 print(f"[Ensemble] Could not save {name}: {exc}")
         # Save weights
-        import json
         meta = {
             'weights': self.weights,
             'names': [n for n, _ in self.detectors],
         }
-        with open(os.path.join(directory, 'ensemble_meta.json'), 'w') as f:
-            import json; json.dump(meta, f, indent=2)
+        with open(os.path.join(directory, 'ensemble_meta.json'), 'w',
+                  encoding='utf-8') as f:
+            json.dump(meta, f, indent=2)
 
     def load(self, directory: str) -> None:
         """
         Load each sub-detector from <directory>/<name>.pkl.
         """
-        import os
+        loaded = 0
         for name, det in self.detectors:
             safe_name = name.replace(' ', '_').lower()
             path = os.path.join(directory, f"{safe_name}.pkl")
             if os.path.exists(path):
                 try:
                     det.load(path)
+                    loaded += 1
                     print(f"[Ensemble] Loaded {name} from {path}")
                 except Exception as exc:
                     print(f"[Ensemble] Could not load {name}: {exc}")
             else:
                 print(f"[Ensemble] No saved model for {name} at {path}")
+
+        # Only report ready if something actually loaded. Marking the ensemble
+        # ready unconditionally made health_check() pass on an empty ensemble,
+        # so predict() returned a 0.0 score that read as a real measurement.
+        if loaded == 0:
+            raise RuntimeError(
+                f"Ensemble: no sub-detectors could be loaded from '{directory}'."
+            )
         self.model = True

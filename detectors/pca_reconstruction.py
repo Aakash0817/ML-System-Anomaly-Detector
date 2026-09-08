@@ -83,18 +83,34 @@ class PCADetector(BaseDetector):
         return float(np.mean((X_scaled - X_recon) ** 2))
 
     def predict(self, features_dict: dict) -> tuple:
-        
-        X = np.array([[features_dict[f] for f in self.feature_order]])
+        self.health_check()
+        X = np.array([[features_dict[f] for f in self.feature_order]],
+                     dtype=float)
         X_scaled = self.scaler.transform(X)
 
         error, latency = self._timed_predict(self._reconstruct_error, X_scaled)
 
-        # Normalize by the training threshold
-        relative_error = error / self.threshold
-        score = -relative_error
+        # Normalise by the training threshold, then map onto the project-wide
+        # score convention: higher = more normal, bounded to [-1, 1].
+        #
+        # The raw value used to be -(error / threshold), which is never
+        # positive and has no lower bound. That broke two consumers that both
+        # average scores across detectors — EnsembleDetector and the monitor's
+        # aggregate — because a single large reconstruction error dragged the
+        # mean arbitrarily far negative regardless of what the other
+        # detectors reported.
+        #
+        # tanh rather than a clip: it is strictly monotonic, so the ranking of
+        # samples by score — and therefore ROC-AUC — is exactly what the raw
+        # reconstruction error gives, while the value itself stays in (-1, 1).
+        # A clip would flatten every error above 2x the threshold to the same
+        # -1 and throw that ranking away.
+        denom = self.threshold if self.threshold > 1e-12 else 1e-12
+        relative_error = error / denom
+        score = float(np.tanh(1.0 - relative_error))
 
         pred = 1 if error <= self.threshold else -1
-        return pred, float(score), latency
+        return pred, score, latency
 
     def health_check(self) -> None:
         if self.pca is None or self.scaler is None or self.threshold is None:

@@ -1,7 +1,7 @@
 # Runtime dependencies, pinned.
 # Tested against Python 3.11.
 
-# Hardware metric collection (data_collector.py, process_tracker.py, comparison.py)
+# Hardware metric collection (data_collector.py, comparison.py)
 psutil==7.2.2
 GPUtil==1.4.0
 
@@ -14,21 +14,21 @@ pandas==2.3.3
 scikit-learn==1.6.1
 joblib==1.6.0
 
-# Gradient-boosted detector (detectors/xgboost_detector.py)
+# Gradient-boosted detector (detectors/xgboost_detector.py).
+# Optional: imported lazily, like tensorflow.
 xgboost==3.2.0
 
-# Neural-network detector (train_rl.py, detectors/rl_agent.py, detectors/test.py)
+# Neural-network detector (train_neural.py, detectors/neural_detector.py).
+# Optional: every other detector runs without it, and detectors/__init__.py
+# imports it lazily.
 # keras is pinned explicitly: tensorflow requires only keras>=3.10.0, and
-# rl_agent.keras was saved with 3.10.0.
+# neural_detector.keras was saved with 3.10.0.
 tensorflow==2.20.0
 keras==3.10.0
 
 # Dashboard GUI and plots (monitor.py, comparison.py)
 PyQt5==5.15.11
 matplotlib==3.11.1
-
-# Desktop notifications (alerting.py); falls back to terminal bell if absent
-plyer==2.1.0
 
 # Keyboard toggles for labeled collection (collect_labeled.py)
 keyboard==0.13.5
@@ -37,3 +37,6 @@ keyboard==0.13.5
 # (data_collector.py imports pythoncom, provided by pywin32)
 WMI==1.5.1
 pywin32==312
+
+# Test suite (python -m pytest tests/)
+pytest==9.0.3

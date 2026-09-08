@@ -15,6 +15,7 @@ from detectors.pca_reconstruction import PCADetector
 from detectors.random_forest import RandomForestDetector
 from detectors.xgboost_detector import XGBoostDetector
 from detectors.neural_detector import NeuralDetector
+from detectors.base import FEATURE_ORDER
 
 import numpy as np
 import pandas as pd
@@ -32,9 +33,12 @@ from PyQt5.QtCore import QTimer, pyqtSignal, QObject, Qt
 from PyQt5.QtGui import QColor, QFont, QBrush
 
 from anomaly_detector import DriftDetector
+from console import enable_unicode_output
 from data_collector import collect_all_metrics
 from logger import CSVLogger
 from seeds import set_global_seeds
+
+enable_unicode_output()
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SAMPLE_INTERVAL    = 1.0
@@ -53,6 +57,27 @@ MAX_CONSECUTIVE_FAILURES = 3
 
 # The verdict needs at least this many healthy detectors to mean anything.
 MIN_HEALTHY_FOR_VOTE = 4
+
+
+def _fmt_num(value, spec: str = '.1f', suffix: str = '', dash: str = '—') -> str:
+    """Format a reading, or a dash when there is none.
+
+    Every metric and every per-detector score can legitimately be None: no
+    temperature sensor, no GPU, or a detector that failed this sample. The
+    GUI formatted them with f'{value:.1f}' directly, which raises TypeError
+    on None and killed the refresh timer for the rest of the session.
+    """
+    if value is None:
+        return dash
+    try:
+        return format(value, spec) + suffix
+    except (TypeError, ValueError):
+        return dash
+
+
+def _plottable(values: list) -> list:
+    """Replace None with NaN so matplotlib draws a gap instead of raising."""
+    return [np.nan if v is None else v for v in values]
 
 
 class DetectorState:
@@ -95,18 +120,45 @@ class DataCollector(QObject):
     """
     new_data = pyqtSignal(object)
 
-    def __init__(self, detectors, state, logger=None, drift=None):
+    def __init__(self, detectors, state, logger=None, drift=None,
+                 fallbacks=None):
         super().__init__()
         self.logger    = logger
         self.drift     = drift or {}    # {name: DriftDetector}, owned by MainWindow
         self.detectors = detectors
         self.state     = state          # {name: DetectorState}, owned by MainWindow
+        self.fallbacks = fallbacks or {}
         self.running   = True
         self._prev_sample_ts = None
 
+    def _model_input(self, metrics: dict) -> dict:
+        """Return a features dict with every FEATURE_ORDER key finite.
+
+        data_collector reports an unavailable sensor as None, on purpose.
+        Passed through raw it becomes a NaN, and the detectors split two ways,
+        both bad: One-Class SVM, LOF, PCA and XGBoost raise, so on a machine
+        with no GPU or no temperature source all four are disabled within
+        MAX_CONSECUTIVE_FAILURES samples — leaving three healthy, below
+        MIN_HEALTHY_FOR_VOTE, so every verdict for the rest of the session is
+        invalid. Isolation Forest, Random Forest and the network accept the
+        NaN and score it silently instead.
+
+        Substitute the training-set median, which is what the model was fitted
+        around, and keep the raw None in metrics so the plots and the CSV still
+        record the reading as missing.
+        """
+        clean = dict(metrics)
+        for feature in FEATURE_ORDER:
+            value = clean.get(feature)
+            if value is None or not np.isfinite(value):
+                clean[feature] = self.fallbacks.get(feature, 0.0)
+        return clean
+
     def run(self):
+        next_sample_at = time.perf_counter()
         while self.running:
             metrics = collect_all_metrics()
+            features = self._model_input(metrics)
             results = []
             for name, det, _ in self.detectors:
                 st = self.state[name]
@@ -116,7 +168,7 @@ class DataCollector(QObject):
                     continue
 
                 try:
-                    pred, score, lat = det.predict(metrics)
+                    pred, score, lat = det.predict(features)
                 except Exception as exc:
                     now_disabled = st.record_failure(exc)
                     if now_disabled:
@@ -161,7 +213,20 @@ class DataCollector(QObject):
             summary = self._summarise(results, jitter_ms)
             self._write_log(now, metrics, results, summary)
             self.new_data.emit((now, metrics, results, summary))
-            time.sleep(SAMPLE_INTERVAL)
+
+            # Sleep to the next slot on a fixed grid rather than for a fixed
+            # duration. Sleeping a flat SAMPLE_INTERVAL *after* the work made
+            # every period longer than the interval by however long the sample
+            # took, so the logged jitter was never negative and just restated
+            # the sampling cost instead of measuring scheduling accuracy.
+            next_sample_at += SAMPLE_INTERVAL
+            remaining = next_sample_at - time.perf_counter()
+            if remaining > 0:
+                time.sleep(remaining)
+            else:
+                # Fell behind: resync so the loop does not spin trying to
+                # catch up on slots it has already missed.
+                next_sample_at = time.perf_counter()
 
     def _write_log(self, ts, metrics, results, summary):
         """Persist one row. Runs on the worker thread so disk I/O stays off
@@ -259,9 +324,10 @@ def _separator() -> QFrame:
 # MainWindow
 # ─────────────────────────────────────────────────────────────────────────────
 class MainWindow(QMainWindow):
-    def __init__(self, detectors):
+    def __init__(self, detectors, fallbacks=None):
         super().__init__()
         self.detectors     = detectors          # [(name, det, needs_labels), ...]
+        self.fallbacks     = fallbacks or {}
         self.detector_state = {name: DetectorState(name)
                                for name, _, _ in detectors}
         # One logger for the whole session. Created here, never inside the
@@ -558,7 +624,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(_section_label("Anomaly Event Log  (newest at top)"))
 
         # ── Anomaly table ─────────────────────────────────────────────────
-        n_models = len(self.detectors)
         model_names = [d[0] for d in self.detectors]
 
         fixed_cols  = ["Time", "CPU %", "CPU °C", "GPU %", "GPU °C",
@@ -639,13 +704,16 @@ class MainWindow(QMainWindow):
             record = {
                 'time':        datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
                 'timestamp':   ts,
-                'cpu_percent': metrics.get('cpu_percent', 0),
-                'cpu_freq':    metrics.get('cpu_freq', 0),
-                'cpu_memory':  metrics.get('cpu_memory', 0),
-                'cpu_temp':    metrics.get('cpu_temp', 0),
-                'gpu_percent': metrics.get('gpu_percent', 0),
-                'gpu_memory':  metrics.get('gpu_memory', 0),
-                'gpu_temp':    metrics.get('gpu_temp', 0),
+                # .get(key, 0) still yields None when the key is present
+                # and the reading was unavailable, so the default never
+                # applied — the table then formatted None and raised.
+                'cpu_percent': metrics.get('cpu_percent'),
+                'cpu_freq':    metrics.get('cpu_freq'),
+                'cpu_memory':  metrics.get('cpu_memory'),
+                'cpu_temp':    metrics.get('cpu_temp'),
+                'gpu_percent': metrics.get('gpu_percent'),
+                'gpu_memory':  metrics.get('gpu_memory'),
+                'gpu_temp':    metrics.get('gpu_temp'),
                 'agg_score':   agg_score,
                 'results':     results,
             }
@@ -679,21 +747,23 @@ class MainWindow(QMainWindow):
         )
 
     def _update_system(self, data_list, rel):
-        cpu_pcts  = [d[1]['cpu_percent'] for d in data_list]
-        cpu_tmps  = [d[1]['cpu_temp']    for d in data_list]
-        gpu_pcts  = [d[1]['gpu_percent'] for d in data_list]
-        gpu_tmps  = [d[1]['gpu_temp']    for d in data_list]
+        cpu_pcts  = [d[1].get('cpu_percent') for d in data_list]
+        cpu_tmps  = [d[1].get('cpu_temp')    for d in data_list]
+        gpu_pcts  = [d[1].get('gpu_percent') for d in data_list]
+        gpu_tmps  = [d[1].get('gpu_temp')    for d in data_list]
 
-        self.line_cpu_pct.set_data(rel, cpu_pcts)
-        self.line_cpu_temp.set_data(rel, cpu_tmps)
-        self.line_gpu_pct.set_data(rel, gpu_pcts)
-        self.line_gpu_temp.set_data(rel, gpu_tmps)
+        self.line_cpu_pct.set_data(rel, _plottable(cpu_pcts))
+        self.line_cpu_temp.set_data(rel, _plottable(cpu_tmps))
+        self.line_gpu_pct.set_data(rel, _plottable(gpu_pcts))
+        self.line_gpu_temp.set_data(rel, _plottable(gpu_tmps))
 
         if rel:
             self.ax_cpu.set_xlim(rel[0], rel[-1])
             self.ax_gpu.set_xlim(rel[0], rel[-1])
-            self.cpu_temp_txt.set_text(f'CPU: {cpu_tmps[-1]:.1f}°C')
-            self.gpu_temp_txt.set_text(f'GPU: {gpu_tmps[-1]:.1f}°C')
+            self.cpu_temp_txt.set_text(
+                'CPU: ' + _fmt_num(cpu_tmps[-1], '.1f', '°C', 'n/a'))
+            self.gpu_temp_txt.set_text(
+                'GPU: ' + _fmt_num(gpu_tmps[-1], '.1f', '°C', 'n/a'))
 
         self.canvas_sys.draw_idle()
 
@@ -745,15 +815,20 @@ class MainWindow(QMainWindow):
 
     def _update_models(self, data_list, rel):
         for i, (name, _, _) in enumerate(self.detectors):
-            scores = [
-                r['score']
-                for d in data_list
-                for r in d[2]
-                if r['name'] == name and r['ok']
-            ]
+            # Keep each score paired with the time it was taken. Collecting
+            # scores into a bare list and drawing them against rel[:len(scores)]
+            # silently shifted the whole trace left by one sample for every
+            # sample that detector had skipped.
+            xs, scores = [], []
+            for t, d in zip(rel, data_list):
+                for r in d[2]:
+                    if r['name'] == name and r['ok']:
+                        xs.append(t)
+                        scores.append(r['score'])
+                        break
             if not scores:
                 continue
-            self.model_lines[i].set_data(rel[:len(scores)], scores)
+            self.model_lines[i].set_data(xs, scores)
             mn, mx = min(scores), max(scores)
             margin = (mx - mn) * 0.12 if mx > mn else 0.5
             self.model_axes[i].set_ylim(mn - margin, mx + margin)
@@ -778,7 +853,7 @@ class MainWindow(QMainWindow):
                 self._lat_bars[i].set_width(0)
                 self._lat_bars[i].set_color('#9ca3af')
                 continue
-            lat = lat_dict.get(name) or 0
+            lat = lat_dict.get(name) or 0.0
             self._lat_bars[i].set_width(lat)
             max_lat = max(max_lat, lat)
             if lat > LAT_CRIT:
@@ -804,7 +879,9 @@ class MainWindow(QMainWindow):
 
         for i, name in enumerate(names):
             hist = list(self._latency_hist[name])
-            lat  = lat_dict.get(name, 0)
+            # None when the detector produced no reading this sample; the old
+            # f'{lat:.3f}' raised TypeError and killed the refresh timer.
+            lat  = lat_dict.get(name)
 
             def _item(txt, align=Qt.AlignCenter):
                 it = QTableWidgetItem(txt)
@@ -812,12 +889,14 @@ class MainWindow(QMainWindow):
                 return it
 
             self.lat_stats_table.setItem(i, 0, _item(name, Qt.AlignLeft))
-            self.lat_stats_table.setItem(i, 1, _item(f"{lat:.3f}"))
+            self.lat_stats_table.setItem(i, 1, _item(_fmt_num(lat, '.3f')))
             self.lat_stats_table.setItem(i, 2, _item(f"{np.mean(hist):.3f}" if hist else "—"))
             self.lat_stats_table.setItem(i, 3, _item(f"{np.min(hist):.3f}"  if hist else "—"))
             self.lat_stats_table.setItem(i, 4, _item(f"{np.max(hist):.3f}"  if hist else "—"))
 
-            if lat > LAT_CRIT:
+            if lat is None:
+                status, fg, bg = "NO DATA", "#374151", "#e5e7eb"
+            elif lat > LAT_CRIT:
                 status, fg, bg = "SLOW",   "#7f1d1d", "#fee2e2"
             elif lat > LAT_WARN:
                 status, fg, bg = "WARN",   "#78350f", "#fef3c7"
@@ -832,7 +911,6 @@ class MainWindow(QMainWindow):
 
     def _update_anomaly_table(self):
         """Rebuild anomaly table rows with full model visibility."""
-        n_models = len(self.detectors)
         model_names = [d[0] for d in self.detectors]
 
         self.anomaly_table.setSortingEnabled(False)
@@ -849,14 +927,21 @@ class MainWindow(QMainWindow):
                 return it
 
             self.anomaly_table.setItem(row, 0, _c(rec['time'], Qt.AlignCenter, bold=True))
-            self.anomaly_table.setItem(row, 1, _c(f"{rec['cpu_percent']:.1f}%"))
-            self.anomaly_table.setItem(row, 2, _c(f"{rec['cpu_temp']:.1f}°C"))
-            self.anomaly_table.setItem(row, 3, _c(f"{rec['gpu_percent']:.1f}%"))
-            self.anomaly_table.setItem(row, 4, _c(f"{rec['gpu_temp']:.1f}°C"))
+            self.anomaly_table.setItem(
+                row, 1, _c(_fmt_num(rec['cpu_percent'], '.1f', '%')))
+            self.anomaly_table.setItem(
+                row, 2, _c(_fmt_num(rec['cpu_temp'], '.1f', '°C')))
+            self.anomaly_table.setItem(
+                row, 3, _c(_fmt_num(rec['gpu_percent'], '.1f', '%')))
+            self.anomaly_table.setItem(
+                row, 4, _c(_fmt_num(rec['gpu_temp'], '.1f', '°C')))
 
             score = rec['agg_score']
-            score_item = _c(f"{score:.3f}", bold=True)
-            if score < -0.5:
+            score_item = _c(_fmt_num(score, '.3f'), bold=True)
+            if score is None:
+                score_item.setForeground(QBrush(QColor("#374151")))
+                score_item.setBackground(QBrush(QColor("#e5e7eb")))
+            elif score < -0.5:
                 score_item.setForeground(QBrush(QColor("#7f1d1d")))
                 score_item.setBackground(QBrush(QColor("#fee2e2")))
             elif score < -0.2:
@@ -867,16 +952,26 @@ class MainWindow(QMainWindow):
                 score_item.setBackground(QBrush(QColor("#dbeafe")))
             self.anomaly_table.setItem(row, 5, score_item)
 
+            # A missing reading is not evidence either way, so skip the
+            # threshold rather than comparing None with a number.
+            def _over(key, limit):
+                v = rec.get(key)
+                return v is not None and v > limit
+
+            def _under(key, limit):
+                v = rec.get(key)
+                return v is not None and v < limit
+
             causes = []
-            if rec['cpu_percent'] > 70:
+            if _over('cpu_percent', 70):
                 causes.append(f"cpu:{rec['cpu_percent']:.0f}%")
-            if rec.get('cpu_freq', 9999) < 1500:
+            if _under('cpu_freq', 1500):
                 causes.append(f"freq:{rec['cpu_freq']:.0f}MHz")
-            if rec.get('cpu_memory', 0) > 75:
+            if _over('cpu_memory', 75):
                 causes.append(f"ram:{rec['cpu_memory']:.0f}%")
-            if rec['cpu_temp'] > 65:
+            if _over('cpu_temp', 65):
                 causes.append(f"cpu_temp:{rec['cpu_temp']:.0f}°C")
-            if rec['gpu_percent'] > 60:
+            if _over('gpu_percent', 60):
                 causes.append(f"gpu:{rec['gpu_percent']:.0f}%")
 
             if not causes:
@@ -896,7 +991,7 @@ class MainWindow(QMainWindow):
                 r = results_map.get(mname)
                 col = 7 + mi
                 if r:
-                    cell = _c(f"{r['score']:.5f}")
+                    cell = _c(_fmt_num(r['score'], '.5f'))
                     if r['pred'] == -1:
                         cell.setBackground(QBrush(QColor("#fee2e2")))
                         cell.setForeground(QBrush(QColor("#991b1b")))
@@ -943,7 +1038,8 @@ class MainWindow(QMainWindow):
 
     def _start_collector(self):
         self.collector = DataCollector(self.detectors, self.detector_state,
-                                       logger=self.logger, drift=self.drift)
+                                       logger=self.logger, drift=self.drift,
+                                       fallbacks=self.fallbacks)
         self.collector.new_data.connect(self._on_new_data)
         self._coll_thread = threading.Thread(
             target=self.collector.run, daemon=True
@@ -987,12 +1083,17 @@ SELFTEST_SECONDS = 30
 
 
 def build_detectors():
-    """Construct and train the detector registry."""
+    """Construct and train the detector registry.
+
+    Returns (detectors, fallbacks), where fallbacks holds the median of each
+    feature over the normal training set. The collector substitutes those for
+    sensors that report nothing, so a missing reading degrades one feature
+    instead of taking every detector out of service.
+    """
     normal_df        = pd.read_csv(NORMAL_DATA_PATH)
     labeled_train_df = pd.read_csv(LABELED_TRAIN_PATH)
     labeled_train_df['label'] = labeled_train_df['label'].apply(lambda x: 1 if x == 0 else -1)
-    features = ['cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
-                'gpu_percent', 'gpu_memory', 'gpu_temp']
+    features = FEATURE_ORDER
 
     detectors = [
         ('Isolation Forest',     IsolationForestDetector(),    False),
@@ -1001,14 +1102,21 @@ def build_detectors():
         ('PCA Reconstruction',   PCADetector(),                False),
         ('Random Forest',        RandomForestDetector(),       True),
         ('XGBoost',              XGBoostDetector(),            True),
-        ('Neural Detector',      NeuralDetector(),             True),
+        # The network ships pre-trained, so it takes no labels here.
+        ('Neural Detector',      NeuralDetector(),             False),
     ]
     for name, det, needs_labels in detectors:
         if needs_labels:
             det.train(labeled_train_df[features], labeled_train_df['label'])
         else:
             det.train(normal_df[features])
-    return detectors
+
+    fallbacks = {
+        f: float(normal_df[f].median())
+        for f in features
+        if f in normal_df.columns and normal_df[f].notna().any()
+    }
+    return detectors, fallbacks
 
 
 def run_selftest(seconds: int = SELFTEST_SECONDS) -> int:
@@ -1020,14 +1128,15 @@ def run_selftest(seconds: int = SELFTEST_SECONDS) -> int:
     import csv as _csv
 
     set_global_seeds()
-    detectors = build_detectors()
+    detectors, fallbacks = build_detectors()
     names     = [n for n, _, _ in detectors]
 
     state  = {n: DetectorState(n) for n in names}
     drift  = {n: DriftDetector() for n in names}
     logger = CSVLogger(LOG_PATH, detector_names=names)
 
-    collector = DataCollector(detectors, state, logger=logger, drift=drift)
+    collector = DataCollector(detectors, state, logger=logger, drift=drift,
+                              fallbacks=fallbacks)
     thread    = threading.Thread(target=collector.run, daemon=True)
 
     print(f"[selftest] collecting for {seconds}s ...", flush=True)
@@ -1090,9 +1199,12 @@ if __name__ == "__main__":
 
     # Detectors are trained in build_detectors(), so seed first.
     set_global_seeds()
-    DETECTORS = build_detectors()
+    DETECTORS, FALLBACKS = build_detectors()
 
     app    = QApplication(sys.argv)
-    window = MainWindow(DETECTORS)
+    window = MainWindow(DETECTORS, FALLBACKS)
     window.show()
+    # Without exec_() the interpreter falls off the end of the script and the
+    # window closes the instant it appears.
+    sys.exit(app.exec_())
     sys.exit(app.exec_())

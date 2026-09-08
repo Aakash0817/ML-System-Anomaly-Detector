@@ -31,11 +31,27 @@ from detectors.oneclass_svm import OneClassSVMDetector
 from detectors.local_outlier import LocalOutlierFactorDetector
 from detectors.pca_reconstruction import PCADetector
 from detectors.random_forest import RandomForestDetector
-from detectors.xgboost_detector import XGBoostDetector
-from detectors.neural_detector import NeuralDetector
 from detectors.ensemble_detector import EnsembleDetector
 from detectors.base import FEATURE_ORDER
 from seeds import set_global_seeds
+from console import enable_unicode_output
+
+enable_unicode_output()
+
+
+def _optional(label: str, factory):
+    """Build a detector, or report why it is unavailable and skip it.
+
+    XGBoost and TensorFlow are heavy optional wheels, and the neural detector
+    also needs artefacts that only exist once train_neural.py has run. Both
+    were constructed unconditionally at import, so a missing backend aborted
+    the whole benchmark instead of costing it one row.
+    """
+    try:
+        return factory()
+    except Exception as exc:
+        print(f"  SKIP {label}: {exc}")
+        return None
 
 # Fix all RNGs before any detector is constructed or trained.
 set_global_seeds()
@@ -61,14 +77,36 @@ X_test         = test_df[FEATURE_ORDER]
 y_test         = test_df['label'].values
 
 # ─── Detector registry ────────────────────────────────────────────────────────
-# Build ensemble sub-detectors (separate instances)
+print("Building detectors …")
+
+
+def _xgboost():
+    from detectors.xgboost_detector import XGBoostDetector
+    return XGBoostDetector()
+
+
+def _neural():
+    from detectors.neural_detector import NeuralDetector
+    det = NeuralDetector()
+    det.health_check()      # refuse to benchmark an unloaded model
+    return det
+
+
+# Ensemble sub-detectors are separate instances from the standalone rows.
 _ens_members = [
     ('IF',  IsolationForestDetector()),
     ('LOF', LocalOutlierFactorDetector()),
     ('PCA', PCADetector()),
     ('RF',  RandomForestDetector()),
-    ('XGB', XGBoostDetector()),
 ]
+_ens_xgb = _optional('XGB (ensemble member)', _xgboost)
+if _ens_xgb is not None:
+    _ens_members.append(('XGB', _ens_xgb))
+# The neural model is pre-trained, so it joins the ensemble as-is. It used to
+# be left out entirely, which is why the ensemble never saw its vote.
+_ens_neural = _optional('Neural (ensemble member)', _neural)
+if _ens_neural is not None:
+    _ens_members.append(('NN', _ens_neural))
 
 DETECTORS = [
     ('Isolation Forest',    IsolationForestDetector(),       False),
@@ -76,10 +114,11 @@ DETECTORS = [
     ('Local Outlier Factor',LocalOutlierFactorDetector(),    False),
     ('PCA Reconstruction',  PCADetector(),                   False),
     ('Random Forest',       RandomForestDetector(),          True),
-    ('XGBoost',             XGBoostDetector(),               True),
-    ('Neural Detector',     NeuralDetector(),                False),
+    ('XGBoost',             _optional('XGBoost', _xgboost),  True),
+    ('Neural Detector',     _optional('Neural Detector', _neural), False),
     ('Ensemble',            EnsembleDetector(_ens_members),  True),   # needs labels for RF/XGB sub-members
 ]
+DETECTORS = [row for row in DETECTORS if row[1] is not None]
 
 results = {}
 
@@ -100,14 +139,17 @@ for name, detector, needs_labels in DETECTORS:
     print(f"  train: {train_time:.2f}s")
 
     # Model size
+    tmp = f"_tmp_{name.replace(' ','_')}.pkl"
     try:
-        tmp = f"_tmp_{name.replace(' ','_')}.pkl"
         obj = detector.model if (hasattr(detector, 'model') and detector.model is not None) else detector
         joblib.dump(obj, tmp)
         model_kb = os.path.getsize(tmp) / 1024
-        os.remove(tmp)
     except Exception:
         model_kb = 0
+    finally:
+        # Leave no scratch file behind when the dump raises part-way.
+        if os.path.exists(tmp):
+            os.remove(tmp)
 
     # Memory
     proc = psutil.Process()
@@ -145,6 +187,10 @@ for name, detector, needs_labels in DETECTORS:
     print(f"  F1={f1:.3f}  AUC={auc:.3f}  latency={avg_lat:.3f}ms")
 
 # ─── Table ────────────────────────────────────────────────────────────────────
+if not results:
+    print("\nNo detector completed the benchmark — nothing to report.")
+    raise SystemExit(1)
+
 df_results = pd.DataFrame(results).T.sort_values('f1_score', ascending=False)
 print("\n" + "=" * 60)
 print("RESULTS (sorted by F1)")
@@ -174,9 +220,13 @@ for idx, (metric, title, color) in enumerate(PLOT_METRICS):
     ax.set_title(title, fontsize=10, fontweight='bold')
     ax.set_xlabel(title, fontsize=8)
     ax.tick_params(axis='y', labelsize=7)
-    # Annotate bars
+    # Annotate bars. Offset by a fraction of the axis range, not by a
+    # multiple of the bar width: a zero-width bar put its label at x=0,
+    # on top of the axis.
+    span = max(vals.max(), 0.0) - min(vals.min(), 0.0)
+    pad = (span or 1.0) * 0.01
     for bar, v in zip(bars, vals):
-        ax.text(bar.get_width() * 1.01, bar.get_y() + bar.get_height() / 2,
+        ax.text(bar.get_width() + pad, bar.get_y() + bar.get_height() / 2,
                 f'{v:.3g}', va='center', fontsize=6)
 
 fig.suptitle("Anomaly Detector Comparison", fontsize=14, fontweight='bold')

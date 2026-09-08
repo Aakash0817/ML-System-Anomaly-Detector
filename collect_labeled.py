@@ -5,7 +5,7 @@ Collect labeled training data with keyboard toggles.
 
 Label convention (fixed)
 ------------------------
-  0 = normal   (consistent with train_rl.py and split_data.py)
+  0 = normal   (consistent with train_neural.py and split_data.py)
   1 = anomaly
 
 Output: data/labeled_raw.csv  (feed into split_data.py next)
@@ -29,7 +29,10 @@ except ImportError:
     print("Install the 'keyboard' library: pip install keyboard")
     sys.exit(1)
 
+from console import enable_unicode_output
 from data_collector import collect_all_metrics
+
+enable_unicode_output()
 
 DURATION = 300          # seconds (adjust upward for more data)
 SAMPLE_INTERVAL = 1
