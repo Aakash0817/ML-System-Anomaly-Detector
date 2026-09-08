@@ -44,6 +44,9 @@ LAT_CRIT  = 50.0
 # A detector that raises this many times in a row is taken out of service.
 MAX_CONSECUTIVE_FAILURES = 3
 
+# The verdict needs at least this many healthy detectors to mean anything.
+MIN_HEALTHY_FOR_VOTE = 4
+
 
 class DetectorState:
     """Health of one detector, preserved across pause/resume cycles."""
@@ -71,8 +74,17 @@ class DetectorState:
 class DataCollector(QObject):
     """
     Runs in a background thread.
-    Emits (timestamp, metrics, results) where results is a list of dicts:
-      {'name', 'pred', 'score', 'latency'}
+
+    Emits (timestamp, metrics, results, summary):
+      results — one dict per detector:
+        {'name', 'pred', 'score', 'latency', 'ok', 'disabled', 'error'}
+        A detector that produced no reading has pred/score/latency None
+        and ok False, so consumers can skip it rather than read a zero.
+      summary — the per-sample verdict, computed once here:
+        {'n_healthy', 'anomaly_votes', 'is_anomaly', 'agg_score',
+         'agg_latency', 'valid', 'jitter_ms'}
+        valid is False when fewer than MIN_HEALTHY_FOR_VOTE detectors
+        reported; is_anomaly and agg_score are then None.
     """
     new_data = pyqtSignal(object)
 
@@ -81,6 +93,7 @@ class DataCollector(QObject):
         self.detectors = detectors
         self.state     = state          # {name: DetectorState}, owned by MainWindow
         self.running   = True
+        self._prev_sample_ts = None
 
     def run(self):
         while self.running:
@@ -119,8 +132,50 @@ class DataCollector(QObject):
                     'disabled': False,
                     'error':   None,
                 })
-            self.new_data.emit((time.time(), metrics, results))
+            now = time.time()
+            if self._prev_sample_ts is None:
+                jitter_ms = 0.0
+            else:
+                jitter_ms = (now - self._prev_sample_ts - SAMPLE_INTERVAL) * 1000.0
+            self._prev_sample_ts = now
+
+            self.new_data.emit(
+                (now, metrics, results, self._summarise(results, jitter_ms))
+            )
             time.sleep(SAMPLE_INTERVAL)
+
+    @staticmethod
+    def _summarise(results, jitter_ms):
+        """
+        The 4-of-7 vote and the aggregate score, computed once per sample for
+        every sample — not only for anomalies. Detectors that produced no
+        reading are excluded, and the verdict is marked invalid when too few
+        remain for it to mean anything.
+        """
+        healthy = [r for r in results if r['ok']]
+        votes   = sum(1 for r in healthy if r['pred'] == -1)
+
+        if len(healthy) < MIN_HEALTHY_FOR_VOTE:
+            return {
+                'n_healthy':     len(healthy),
+                'anomaly_votes': votes,
+                'is_anomaly':    None,
+                'agg_score':     None,
+                'agg_latency':   None,
+                'valid':         False,
+                'jitter_ms':     jitter_ms,
+            }
+
+        required = max(MIN_HEALTHY_FOR_VOTE, round(len(healthy) * 0.6))
+        return {
+            'n_healthy':     len(healthy),
+            'anomaly_votes': votes,
+            'is_anomaly':    votes >= required,
+            'agg_score':     float(np.mean([r['score'] for r in healthy])),
+            'agg_latency':   float(np.sum([r['latency'] for r in healthy])),
+            'valid':         True,
+            'jitter_ms':     jitter_ms,
+        }
 
     @staticmethod
     def _failed(name, st, disabled):
@@ -520,20 +575,16 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────────
 
     def _on_new_data(self, data):
-        ts, metrics, results = data
+        ts, metrics, results, summary = data
         self.buffer.append(data)
 
         for r in results:
             if r['ok']:
                 self._latency_hist[r['name']].append(r['latency'])
 
-        healthy       = [r for r in results if r['ok']]
-        anomaly_votes = sum(1 for r in healthy if r['pred'] == -1)
-        is_anomaly    = (len(healthy) >= 4
-                         and anomaly_votes >= max(4, round(len(healthy) * 0.6)))
-
-        if is_anomaly:
-            agg_score = np.mean([r['score'] for r in healthy])
+        # The vote is computed once in the collector; do not recompute it here.
+        if summary['is_anomaly']:
+            agg_score = summary['agg_score']
             record = {
                 'time':        datetime.fromtimestamp(ts).strftime('%H:%M:%S'),
                 'timestamp':   ts,
