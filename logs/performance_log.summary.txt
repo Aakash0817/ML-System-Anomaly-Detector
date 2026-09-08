@@ -1,3 +1,0 @@
-Log file      : logs\performance_log.csv
-Total rows    : 21
-Anomalies     : 0 (0.0%)
