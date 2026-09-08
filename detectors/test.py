@@ -3,8 +3,8 @@ import numpy as np
 import joblib
 import tensorflow as tf
 
-scaler = joblib.load('rl_agent_scaler.pkl')
-model  = tf.keras.models.load_model('rl_agent.keras')
+scaler = joblib.load('neural_detector_scaler.pkl')
+model  = tf.keras.models.load_model('neural_detector.keras')
 
 # Simulate a normal sample
 normal = np.array([[15.0, 2400.0, 55.0, 52.0, 5.0, 14.0, 44.0]])

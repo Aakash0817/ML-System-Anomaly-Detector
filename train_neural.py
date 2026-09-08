@@ -1,8 +1,8 @@
 """
-train_rl.py
-===========
-Trains the neural-network classifier (RL agent).
-Run directly: python train_rl.py
+train_neural.py
+===============
+Trains the neural-network binary classifier.
+Run directly: python train_neural.py
 """
 
 from pathlib import Path
@@ -21,8 +21,8 @@ from seeds import SEED, set_global_seeds
 set_global_seeds()
 
 DATA_PATH   = Path('data/labeled_training.csv')
-MODEL_PATH  = Path('rl_agent.keras')
-SCALER_PATH = Path('rl_agent_scaler.pkl')
+MODEL_PATH  = Path('neural_detector.keras')
+SCALER_PATH = Path('neural_detector_scaler.pkl')
 
 FEATURES = [
     'cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',

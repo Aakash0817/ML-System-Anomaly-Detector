@@ -64,14 +64,12 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 |---|---|---|---|---|---|
 | **XGBoost** | **0.966** | 0.974 | 0.992 | 0.914 | ~5 |
 | **Random Forest** | 0.937 | 0.975 | 0.981 | 0.897 | 41.4 |
-| **RL Agent** | 0.929 | 0.056* | 0.963 | 0.897 | 63.1 |
+| **Neural Detector** | 0.929 | 0.944 | 0.963 | 0.897 | 91.8 |
 | **Ensemble** | 0.898 | 0.876 | 0.883 | 0.914 | 78.7 |
 | Isolation Forest | 0.857 | 0.882 | 0.836 | 0.879 | 4.98 |
 | One-Class SVM | 0.841 | **0.930** | 0.779 | 0.914 | 1.01 |
 | PCA Reconstruction | 0.812 | 0.635 | 0.700 | 0.966 | 0.143 |
 | Local Outlier Factor | 0.733 | 0.500 | 0.657 | 0.828 | 37.5 |
-
-> \* RL Agent ROC-AUC reflects the binary classification output format rather than a continuous anomaly score.
 
 ![Comparison Plot](comparison_plots.png)
 
@@ -80,7 +78,7 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 ##  Features
 
 - **Live hardware metrics** — CPU usage, frequency, memory, and temperature (via a non-blocking background WMI thread on Windows); GPU load, memory, and temperature via `GPUtil`
-- **8 anomaly detectors** — Isolation Forest, One-Class SVM, Local Outlier Factor, PCA Reconstruction, Random Forest, XGBoost, a neural-network RL agent, and a voting Ensemble
+- **8 anomaly detectors** — Isolation Forest, One-Class SVM, Local Outlier Factor, PCA Reconstruction, Random Forest, XGBoost, a neural-network classifier, and a voting Ensemble
 - **PyQt5 dashboard** — Tabbed UI with system overview, per-core usage charts, model score timelines, latency stats, and a live anomaly event log
 - **Online drift detection** — Page-Hinkley test on the score stream signals when the model distribution has shifted and retraining may be needed
 - **Thread-safe CSV logging** — Every sample, prediction, score, latency, jitter, and drift flag is written to `performance_log.csv` with a summary on close
@@ -100,7 +98,7 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 │   ├── pca_reconstruction.py
 │   ├── random_forest.py
 │   ├── xgboost_detector.py
-│   ├── rl_agent.py
+│   ├── neural_detector.py
 │   └── ensemble_detector.py
 │
 ├── data/                       # Training / test data (created by collection scripts)
@@ -116,11 +114,11 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 │
 ├── collect_normal.py           # Step 1 – collect normal baseline data
 ├── collect_labeled.py          # Step 2 – collect labeled data (keyboard-toggled)
-├── train_rl.py                 # Train the RL agent (neural network)
+├── train_neural.py             # Train the neural-network detector
 ├── comparison.py               # Benchmark all detectors
 │
-├── rl_agent.keras              # Pre-trained neural network weights
-├── rl_agent_scaler.pkl         # StandardScaler for RL agent
+├── neural_detector.keras       # Pre-trained neural network weights
+├── neural_detector_scaler.pkl  # StandardScaler for the neural detector
 ├── isolation_forest.pkl        # Pre-trained IsolationForest (optional)
 │
 ├── comparison_results.csv      # Latest benchmark results
@@ -173,8 +171,8 @@ python split_data.py
 # Train IsolationForest on normal data only
 python train_model.py
 
-# Train the neural-network RL agent on labeled data
-python train_rl.py
+# Train the neural-network detector on labeled data
+python train_neural.py
 ```
 
 All other detectors (RF, XGBoost, LOF, PCA, SVM) are trained automatically at runtime.
@@ -352,7 +350,7 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 | Tool | Purpose |
 |---|---|
 |  Python | Core language |
-|  TensorFlow / Keras | RL agent neural network |
+|  TensorFlow / Keras | Neural-network detector |
 |  scikit-learn | Isolation Forest, SVM, LOF, PCA, Random Forest |
 |  XGBoost | Gradient-boosted detector |
 |  PyQt5 | Live dashboard GUI |

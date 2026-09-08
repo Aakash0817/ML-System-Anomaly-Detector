@@ -32,7 +32,7 @@ from detectors.local_outlier import LocalOutlierFactorDetector
 from detectors.pca_reconstruction import PCADetector
 from detectors.random_forest import RandomForestDetector
 from detectors.xgboost_detector import XGBoostDetector
-from detectors.rl_agent import RLAgentDetector
+from detectors.neural_detector import NeuralDetector
 from detectors.ensemble_detector import EnsembleDetector
 from detectors.base import FEATURE_ORDER
 from seeds import set_global_seeds
@@ -77,7 +77,7 @@ DETECTORS = [
     ('PCA Reconstruction',  PCADetector(),                   False),
     ('Random Forest',       RandomForestDetector(),          True),
     ('XGBoost',             XGBoostDetector(),               True),
-    ('RL Agent',            RLAgentDetector(),               False),
+    ('Neural Detector',     NeuralDetector(),                False),
     ('Ensemble',            EnsembleDetector(_ens_members),  True),   # needs labels for RF/XGB sub-members
 ]
 

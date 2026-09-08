@@ -1,7 +1,7 @@
 """
-rl_agent.py
-===========
-Detector wrapper for the trained Keras classifier (RL agent).
+neural_detector.py
+==================
+Detector wrapper for the trained Keras binary classifier.
 """
 
 import time                     # ← new import
@@ -11,13 +11,13 @@ import tensorflow as tf
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent.parent
-MODEL_PATH = BASE_DIR / 'rl_agent.keras'
-SCALER_PATH = BASE_DIR / 'rl_agent_scaler.pkl'
+MODEL_PATH = BASE_DIR / 'neural_detector.keras'
+SCALER_PATH = BASE_DIR / 'neural_detector_scaler.pkl'
 FEATURES = ['cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
             'gpu_percent', 'gpu_memory', 'gpu_temp']
 
 
-class RLAgentDetector:
+class NeuralDetector:
     def __init__(self):
         self.model = tf.keras.models.load_model(MODEL_PATH)
         self.scaler = joblib.load(SCALER_PATH)
@@ -40,7 +40,7 @@ class RLAgentDetector:
         X = np.array([[features[f] for f in self.feature_order]])
         X_scaled = self.scaler.transform(X)
 
-        # The sigmoid head outputs P(anomaly), because train_rl.py keeps the
+        # The sigmoid head outputs P(anomaly), because train_neural.py keeps the
         # collect_labeled convention of 0 = normal, 1 = anomaly. Map it onto the
         # project-wide score convention used by every other detector:
         # higher = more normal, on [-1, 1].

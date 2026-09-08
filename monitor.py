@@ -14,7 +14,7 @@ from detectors.local_outlier import LocalOutlierFactorDetector
 from detectors.pca_reconstruction import PCADetector
 from detectors.random_forest import RandomForestDetector
 from detectors.xgboost_detector import XGBoostDetector
-from detectors.rl_agent import RLAgentDetector
+from detectors.neural_detector import NeuralDetector
 
 import numpy as np
 import pandas as pd
@@ -1001,7 +1001,7 @@ def build_detectors():
         ('PCA Reconstruction',   PCADetector(),                False),
         ('Random Forest',        RandomForestDetector(),       True),
         ('XGBoost',              XGBoostDetector(),            True),
-        ('RL Agent',             RLAgentDetector(),            True),
+        ('Neural Detector',      NeuralDetector(),             True),
     ]
     for name, det, needs_labels in detectors:
         if needs_labels:
@@ -1088,29 +1088,9 @@ if __name__ == "__main__":
     if '--selftest' in sys.argv:
         sys.exit(run_selftest())
 
-    # Detectors are trained at startup below, so seed first.
+    # Detectors are trained in build_detectors(), so seed first.
     set_global_seeds()
-
-    normal_df        = pd.read_csv(NORMAL_DATA_PATH)
-    labeled_train_df = pd.read_csv(LABELED_TRAIN_PATH)
-    labeled_train_df['label'] = labeled_train_df['label'].apply(lambda x: 1 if x == 0 else -1)
-    features = ['cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp', 'gpu_percent', 'gpu_memory', 'gpu_temp']
-
-    DETECTORS = [
-        ('Isolation Forest',     IsolationForestDetector(),    False),
-        ('One-Class SVM',        OneClassSVMDetector(),        False),
-        ('Local Outlier Factor', LocalOutlierFactorDetector(), False),
-        ('PCA Reconstruction',   PCADetector(),                False),
-        ('Random Forest',        RandomForestDetector(),       True),
-        ('XGBoost',              XGBoostDetector(),            True),
-        ('RL Agent',             RLAgentDetector(),            True),
-    ]
-
-    for name, det, needs_labels in DETECTORS:
-        if needs_labels:
-            det.train(labeled_train_df[features], labeled_train_df['label'])
-        else:
-            det.train(normal_df[features])
+    DETECTORS = build_detectors()
 
     app    = QApplication(sys.argv)
     window = MainWindow(DETECTORS)

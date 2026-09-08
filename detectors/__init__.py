@@ -5,7 +5,7 @@ from .oneclass_svm import OneClassSVMDetector
 from .pca_reconstruction import PCADetector
 from .random_forest import RandomForestDetector
 from .xgboost_detector import XGBoostDetector
-from .rl_agent import RLAgentDetector
+from .neural_detector import NeuralDetector
 from .ensemble_detector import EnsembleDetector
 
 __all__ = [
@@ -13,5 +13,5 @@ __all__ = [
     'IsolationForestDetector', 'LocalOutlierFactorDetector',
     'OneClassSVMDetector', 'PCADetector',
     'RandomForestDetector', 'XGBoostDetector',
-    'RLAgentDetector', 'EnsembleDetector',
+    'NeuralDetector', 'EnsembleDetector',
 ]
