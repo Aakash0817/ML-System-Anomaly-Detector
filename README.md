@@ -2,10 +2,6 @@
 
 A real-time system monitoring tool that collects CPU/GPU hardware metrics and detects anomalies using an ensemble of machine learning models, with a live PyQt5 dashboard, desktop alerting, and detailed CSV logging.
 
-![Python](https://img.shields.io/badge/Python-3.9%2B-blue?logo=python)
-![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange?logo=tensorflow)
-![scikit-learn](https://img.shields.io/badge/scikit--learn-latest-f7931e?logo=scikit-learn)
-
 
 ---
 
@@ -419,11 +415,3 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 |  psutil + GPUtil | Hardware metric collection |
 |  Matplotlib | Benchmark visualisations |
 |  plyer | Cross-platform desktop notifications |
-
----
-
-<div align="center">
-
-Made with ❤️  by [Aakash0817](https://github.com/Aakash0817)
-
-</div>
