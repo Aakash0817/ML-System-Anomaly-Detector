@@ -1,0 +1,39 @@
+# Runtime dependencies, pinned.
+# Tested against Python 3.11.
+
+# Hardware metric collection (data_collector.py, process_tracker.py, comparison.py)
+psutil==7.2.2
+GPUtil==1.4.0
+
+# Numerics and data handling (all modules)
+numpy==2.2.6
+pandas==2.3.3
+
+# Classical detectors: Isolation Forest, One-Class SVM, LOF, PCA, Random Forest
+# (detectors/*.py, detectors/split_data.py, comparison.py)
+scikit-learn==1.6.1
+joblib==1.6.0
+
+# Gradient-boosted detector (detectors/xgboost_detector.py)
+xgboost==3.2.0
+
+# Neural-network detector (train_rl.py, detectors/rl_agent.py, detectors/test.py)
+# keras is pinned explicitly: tensorflow requires only keras>=3.10.0, and
+# rl_agent.keras was saved with 3.10.0.
+tensorflow==2.20.0
+keras==3.10.0
+
+# Dashboard GUI and plots (monitor.py, comparison.py)
+PyQt5==5.15.11
+matplotlib==3.11.1
+
+# Desktop notifications (alerting.py); falls back to terminal bell if absent
+plyer==2.1.0
+
+# Keyboard toggles for labeled collection (collect_labeled.py)
+keyboard==0.13.5
+
+# Windows-only: CPU temperature via OpenHardwareMonitor WMI namespace
+# (data_collector.py imports pythoncom, provided by pywin32)
+WMI==1.5.1
+pywin32==312
