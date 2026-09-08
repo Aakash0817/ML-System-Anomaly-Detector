@@ -61,7 +61,8 @@ class PCADetector(BaseDetector):
             )
 
         # Fit PCA with fixed number of components
-        self.pca = PCA(n_components=self.n_components, whiten=False)
+        self.pca = PCA(n_components=self.n_components, whiten=False,
+                       random_state=42)
         self.pca.fit(X_scaled)
 
         # Compute reconstruction errors on training data

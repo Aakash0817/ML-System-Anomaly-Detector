@@ -19,12 +19,15 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from seeds import SEED
+
 DATA_DIR = Path('data')
 RAW_PATH = DATA_DIR / 'labeled_raw.csv'
 TRAIN_PATH = DATA_DIR / 'labeled_training.csv'
 TEST_PATH = DATA_DIR / 'labeled_test.csv'
 TEST_SIZE = 0.3
-RANDOM_STATE = 42
+RANDOM_STATE = SEED
 
 # ── Source selection ──────────────────────────────────────────────────────────
 if RAW_PATH.exists():

@@ -14,6 +14,12 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 
+from seeds import SEED, set_global_seeds
+
+# Seed before the model is built: controls weight initialisation,
+# dropout masks and the shuffling inside model.fit().
+set_global_seeds()
+
 DATA_PATH   = Path('data/labeled_training.csv')
 MODEL_PATH  = Path('rl_agent.keras')
 SCALER_PATH = Path('rl_agent_scaler.pkl')
@@ -45,7 +51,7 @@ print(f"Scaler saved → {SCALER_PATH}")
 
 # ── Train / val split ─────────────────────────────────────────────────────────
 X_train, X_val, y_train, y_val = train_test_split(
-    X_scaled, y, test_size=0.2, random_state=42, stratify=y
+    X_scaled, y, test_size=0.2, random_state=SEED, stratify=y
 )
 
 # ── Class weights ─────────────────────────────────────────────────────────────

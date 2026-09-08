@@ -28,6 +28,7 @@ from detectors.random_forest import RandomForestDetector
 from detectors.xgboost_detector import XGBoostDetector
 from detectors.rl_agent import RLAgentDetector
 from data_collector import collect_all_metrics
+from seeds import set_global_seeds
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SAMPLE_INTERVAL    = 1.0
@@ -774,6 +775,9 @@ class MainWindow(QMainWindow):
         event.accept()
 
 if __name__ == "__main__":
+    # Detectors are trained at startup below, so seed first.
+    set_global_seeds()
+
     normal_df        = pd.read_csv(NORMAL_DATA_PATH)
     labeled_train_df = pd.read_csv(LABELED_TRAIN_PATH)
     labeled_train_df['label'] = labeled_train_df['label'].apply(lambda x: 1 if x == 0 else -1)

@@ -20,8 +20,14 @@ import numpy as np
 import pandas as pd
 from collections import deque
 
+from seeds import SEED
+
 # Minimum samples before z-score is meaningful
 _MIN_STATS_SAMPLES = 30
+
+# Dedicated generator for the dummy fallback below, so a run without a
+# trained model still produces the same sequence every time.
+_DUMMY_RNG = np.random.default_rng(SEED)
 
 FEATURE_ORDER = [
     'cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
@@ -186,7 +192,7 @@ class AnomalyDetector:
 
     def _dummy_predict(self, features: dict) -> tuple:
         time.sleep(0.001)
-        score = float(np.random.uniform(-0.5, 0.5))
+        score = float(_DUMMY_RNG.uniform(-0.5, 0.5))
         pred = 1 if score > 0 else -1
         if pred == 1:
             self.explainer.update_normal(features)

@@ -35,6 +35,10 @@ from detectors.xgboost_detector import XGBoostDetector
 from detectors.rl_agent import RLAgentDetector
 from detectors.ensemble_detector import EnsembleDetector
 from detectors.base import FEATURE_ORDER
+from seeds import set_global_seeds
+
+# Fix all RNGs before any detector is constructed or trained.
+set_global_seeds()
 
 # ─── Load data ────────────────────────────────────────────────────────────────
 print("Loading datasets …")
