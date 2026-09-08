@@ -115,8 +115,26 @@ class DriftDetector:
         self._mean = 0.0
         self.drift_flag = False
 
+    @property
+    def statistic(self) -> float:
+        """Raw Page-Hinkley statistic: cumulative deviation above its running
+        minimum. Reported as-is, with no threshold applied."""
+        return self._cum_sum - self._min_cum
+
+    @property
+    def n_seen(self) -> int:
+        return self._n
+
     def update(self, value: float) -> bool:
-        """Update and return True if drift detected."""
+        """Update and return True if drift detected.
+
+        Non-finite values are ignored. A single NaN would otherwise poison
+        _cum_sum permanently, silently disabling the test for the rest of the
+        session, since every later comparison against NaN is False.
+        """
+        if value is None or not np.isfinite(value):
+            return self.drift_flag
+
         self._n += 1
         # Online mean
         self._mean += (value - self._mean) / self._n

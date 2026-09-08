@@ -4,6 +4,18 @@ import time
 from collections import deque
 from datetime import datetime
 
+# ── Detector imports ──────────────────────────────────────────────────────────
+# These must precede anything that loads Qt (PyQt5 itself and matplotlib's
+# qt5agg backend): importing Qt first loads MSVC runtime DLLs that make
+# TensorFlow's native library fail to initialise on Windows.
+from detectors.isolation_forest import IsolationForestDetector
+from detectors.oneclass_svm import OneClassSVMDetector
+from detectors.local_outlier import LocalOutlierFactorDetector
+from detectors.pca_reconstruction import PCADetector
+from detectors.random_forest import RandomForestDetector
+from detectors.xgboost_detector import XGBoostDetector
+from detectors.rl_agent import RLAgentDetector
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -19,21 +31,16 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import QTimer, pyqtSignal, QObject, Qt
 from PyQt5.QtGui import QColor, QFont, QBrush
 
-# ── Detector imports ──────────────────────────────────────────────────────────
-from detectors.isolation_forest import IsolationForestDetector
-from detectors.oneclass_svm import OneClassSVMDetector
-from detectors.local_outlier import LocalOutlierFactorDetector
-from detectors.pca_reconstruction import PCADetector
-from detectors.random_forest import RandomForestDetector
-from detectors.xgboost_detector import XGBoostDetector
-from detectors.rl_agent import RLAgentDetector
+from anomaly_detector import DriftDetector
 from data_collector import collect_all_metrics
+from logger import CSVLogger
 from seeds import set_global_seeds
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SAMPLE_INTERVAL    = 1.0
 BUFFER_SIZE        = 100
 MAX_ANOMALY_ROWS   = 200     # max rows kept in the anomaly log table
+LOG_PATH           = 'logs/performance_log.csv'
 NORMAL_DATA_PATH   = 'data/normal_training.csv'
 LABELED_TRAIN_PATH = 'data/labeled_training.csv'
 
@@ -88,8 +95,10 @@ class DataCollector(QObject):
     """
     new_data = pyqtSignal(object)
 
-    def __init__(self, detectors, state):
+    def __init__(self, detectors, state, logger=None, drift=None):
         super().__init__()
+        self.logger    = logger
+        self.drift     = drift or {}    # {name: DriftDetector}, owned by MainWindow
         self.detectors = detectors
         self.state     = state          # {name: DetectorState}, owned by MainWindow
         self.running   = True
@@ -123,6 +132,15 @@ class DataCollector(QObject):
                     continue
 
                 st.record_success()
+
+                # One Page-Hinkley tracker per detector, on that detector's own
+                # score stream. Raw statistic only: no threshold, no alert.
+                ph = self.drift.get(name)
+                ph_stat = None
+                if ph is not None:
+                    ph.update(score)
+                    ph_stat = ph.statistic
+
                 results.append({
                     'name':    name,
                     'pred':    pred,
@@ -131,6 +149,7 @@ class DataCollector(QObject):
                     'ok':      True,
                     'disabled': False,
                     'error':   None,
+                    'ph_stat': ph_stat,
                 })
             now = time.time()
             if self._prev_sample_ts is None:
@@ -139,10 +158,33 @@ class DataCollector(QObject):
                 jitter_ms = (now - self._prev_sample_ts - SAMPLE_INTERVAL) * 1000.0
             self._prev_sample_ts = now
 
-            self.new_data.emit(
-                (now, metrics, results, self._summarise(results, jitter_ms))
-            )
+            summary = self._summarise(results, jitter_ms)
+            self._write_log(now, metrics, results, summary)
+            self.new_data.emit((now, metrics, results, summary))
             time.sleep(SAMPLE_INTERVAL)
+
+    def _write_log(self, ts, metrics, results, summary):
+        """Persist one row. Runs on the worker thread so disk I/O stays off
+        the GUI thread; CSVLogger has its own lock."""
+        if self.logger is None:
+            return
+        per_detector = {
+            r['name']: {'score': r['score'], 'latency': r['latency'],
+                        'ok': r['ok'], 'ph_stat': r.get('ph_stat')}
+            for r in results
+        }
+        anomaly = None
+        if summary['valid']:
+            anomaly = -1 if summary['is_anomaly'] else 1
+        try:
+            self.logger.log(
+                timestamp=ts, metrics=metrics, anomaly=anomaly,
+                score=summary['agg_score'], latency=summary['agg_latency'],
+                jitter=summary['jitter_ms'], n_healthy=summary['n_healthy'],
+                verdict_valid=summary['valid'], per_detector=per_detector,
+            )
+        except Exception as exc:
+            print(f"[CSVLogger] write failed: {exc}", flush=True)
 
     @staticmethod
     def _summarise(results, jitter_ms):
@@ -189,6 +231,7 @@ class DataCollector(QObject):
             'ok':      False,
             'disabled': disabled,
             'error':   st.last_error,
+            'ph_stat': None,
         }
 
     def stop(self):
@@ -221,6 +264,14 @@ class MainWindow(QMainWindow):
         self.detectors     = detectors          # [(name, det, needs_labels), ...]
         self.detector_state = {name: DetectorState(name)
                                for name, _, _ in detectors}
+        # One logger for the whole session. Created here, never inside the
+        # collector: CSVLogger opens with mode 'w', so building a second one
+        # on resume would truncate the log.
+        self.logger = CSVLogger(LOG_PATH,
+                                detector_names=[n for n, _, _ in detectors])
+        # Scores differ in scale and meaning across detectors, so each gets its
+        # own tracker rather than sharing one over a mixed stream.
+        self.drift = {name: DriftDetector() for name, _, _ in detectors}
         self.buffer        = deque(maxlen=BUFFER_SIZE)
         self.anomaly_log   = []                 # list of dicts for Anomaly tab
         self._latency_hist = {                  # rolling history per model
@@ -891,7 +942,8 @@ class MainWindow(QMainWindow):
         pd.DataFrame(rows).to_csv(path, index=False)
 
     def _start_collector(self):
-        self.collector = DataCollector(self.detectors, self.detector_state)
+        self.collector = DataCollector(self.detectors, self.detector_state,
+                                       logger=self.logger, drift=self.drift)
         self.collector.new_data.connect(self._on_new_data)
         self._coll_thread = threading.Thread(
             target=self.collector.run, daemon=True
@@ -923,9 +975,119 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         self.timer.stop()
         self.collector.stop()
+        # Join before closing: stop() only sets a flag, so the worker may still
+        # be mid-sample and would otherwise write to a closed file.
+        thread = getattr(self, '_coll_thread', None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=SAMPLE_INTERVAL + 2.0)
+        self.logger.close()
         event.accept()
 
+SELFTEST_SECONDS = 30
+
+
+def build_detectors():
+    """Construct and train the detector registry."""
+    normal_df        = pd.read_csv(NORMAL_DATA_PATH)
+    labeled_train_df = pd.read_csv(LABELED_TRAIN_PATH)
+    labeled_train_df['label'] = labeled_train_df['label'].apply(lambda x: 1 if x == 0 else -1)
+    features = ['cpu_percent', 'cpu_freq', 'cpu_memory', 'cpu_temp',
+                'gpu_percent', 'gpu_memory', 'gpu_temp']
+
+    detectors = [
+        ('Isolation Forest',     IsolationForestDetector(),    False),
+        ('One-Class SVM',        OneClassSVMDetector(),        False),
+        ('Local Outlier Factor', LocalOutlierFactorDetector(), False),
+        ('PCA Reconstruction',   PCADetector(),                False),
+        ('Random Forest',        RandomForestDetector(),       True),
+        ('XGBoost',              XGBoostDetector(),            True),
+        ('RL Agent',             RLAgentDetector(),            True),
+    ]
+    for name, det, needs_labels in detectors:
+        if needs_labels:
+            det.train(labeled_train_df[features], labeled_train_df['label'])
+        else:
+            det.train(normal_df[features])
+    return detectors
+
+
+def run_selftest(seconds: int = SELFTEST_SECONDS) -> int:
+    """
+    Collect for *seconds* with no GUI, then check the log is real data.
+
+    Returns a process exit code: 0 if every check passes, 1 otherwise.
+    """
+    import csv as _csv
+
+    set_global_seeds()
+    detectors = build_detectors()
+    names     = [n for n, _, _ in detectors]
+
+    state  = {n: DetectorState(n) for n in names}
+    drift  = {n: DriftDetector() for n in names}
+    logger = CSVLogger(LOG_PATH, detector_names=names)
+
+    collector = DataCollector(detectors, state, logger=logger, drift=drift)
+    thread    = threading.Thread(target=collector.run, daemon=True)
+
+    print(f"[selftest] collecting for {seconds}s ...", flush=True)
+    thread.start()
+    time.sleep(seconds)
+    collector.stop()
+    thread.join(timeout=SAMPLE_INTERVAL + 2.0)
+    logger.close()
+
+    with open(LOG_PATH, newline='', encoding='utf-8') as fh:
+        rows = list(_csv.DictReader(fh))
+
+    failures = []
+
+    def check(label, ok, detail=''):
+        print(f"  [{'PASS' if ok else 'FAIL'}] {label}"
+              f"{'  — ' + detail if detail else ''}", flush=True)
+        if not ok:
+            failures.append(label)
+
+    check('log has rows', len(rows) > 0, f'{len(rows)} rows')
+    if not rows:
+        print('[selftest] FAILED: no rows to inspect', flush=True)
+        return 1
+
+    def col(name):
+        return [float(r[name]) for r in rows if r.get(name) not in (None, '')]
+
+    lat = col('inference_latency_ms')
+    check('latencies are not all identical', len(set(lat)) > 1,
+          f'{len(set(lat))} distinct of {len(lat)}')
+
+    sc = col('score')
+    check('aggregate score is not constant', len(set(sc)) > 1,
+          f'{len(set(sc))} distinct of {len(sc)}')
+
+    for n in names:
+        slug = _slug_name(n)
+        vals = col(f'{slug}_score')
+        if not vals:
+            check(f'{n}: reported at least one score', False, 'no readings')
+            continue
+        variance = max(vals) - min(vals)
+        check(f'{n}: score variance > 0', variance > 0,
+              f'range {variance:.6g} over {len(vals)} samples')
+
+    print('')
+    verdict = 'PASSED' if not failures else 'FAILED'
+    print(f"[selftest] {verdict} - {len(failures)} check(s) failed", flush=True)
+    return 1 if failures else 0
+
+
+def _slug_name(name: str) -> str:
+    return name.lower().replace(' ', '_').replace('-', '_')
+
+
 if __name__ == "__main__":
+    if '--selftest' in sys.argv:
+        sys.exit(run_selftest())
+
     # Detectors are trained at startup below, so seed first.
     set_global_seeds()
 
