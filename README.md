@@ -1,6 +1,6 @@
 #  ML System Anomaly Detector
 
-A real-time system monitoring tool that collects CPU/GPU hardware metrics and detects anomalies using an ensemble of machine learning models, with a live PyQt5 dashboard, desktop alerting, and detailed CSV logging.
+A real-time system monitoring tool that collects CPU/GPU hardware metrics and detects anomalies using an ensemble of machine learning models, with a live PyQt5 dashboard and detailed CSV logging.
 
 
 ---
@@ -49,7 +49,7 @@ The PyQt5 GUI is organized into tabs, each surfacing a different layer of monito
       <br/>
       <b>5 · Anomaly Event Log</b>
       <br/>
-      <sub>Scrollable table of every alert with timestamp, score, and plain-English explanation of the top-3 deviating features — e.g. <code>gpu_memory: 14.2 (high, expected ≈9.4, z=1.9)</code>. Color-coded by severity.</sub>
+      <sub>Scrollable table of flagged samples with timestamp and per-detector scores.</sub>
     </td>
   </tr>
 </table>
@@ -82,7 +82,6 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 - **Live hardware metrics** — CPU usage, frequency, memory, and temperature (via a non-blocking background WMI thread on Windows); GPU load, memory, and temperature via `GPUtil`
 - **8 anomaly detectors** — Isolation Forest, One-Class SVM, Local Outlier Factor, PCA Reconstruction, Random Forest, XGBoost, a neural-network RL agent, and a voting Ensemble
 - **PyQt5 dashboard** — Tabbed UI with system overview, per-core usage charts, model score timelines, latency stats, and a live anomaly event log
-- **Smart alerting** — Desktop notifications via `plyer` with configurable cooldowns; falls back to terminal bell; all alerts persisted to `alerts.jsonl`
 - **Online drift detection** — Page-Hinkley test on the score stream signals when the model distribution has shifted and retraining may be needed
 - **Thread-safe CSV logging** — Every sample, prediction, score, latency, jitter, and drift flag is written to `performance_log.csv` with a summary on close
 - **Modular detector design** — Add a new detector by inheriting from `BaseDetector` and registering it in `comparison.py` / `monitor.py`
@@ -111,11 +110,9 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 │   └── labeled_test.csv
 │
 ├── monitor.py                  # Main GUI application (entry point)
-├── alerting.py                 # Non-blocking alert system
 ├── anomaly_detector.py         # Standalone IsolationForest wrapper with drift detection
 ├── logger.py                   # Thread-safe CSV logger
 ├── data_collector.py           # Hardware metric collection
-├── process_tracker.py          # Top-process monitoring
 │
 ├── collect_normal.py           # Step 1 – collect normal baseline data
 ├── collect_labeled.py          # Step 2 – collect labeled data (keyboard-toggled)
@@ -128,7 +125,6 @@ All eight detectors were evaluated on the same labeled test set. Supervised mode
 │
 ├── comparison_results.csv      # Latest benchmark results
 ├── comparison_plots.png        # Benchmark visualisation
-├── alerts.jsonl                # Runtime alert history
 ├── performance_log.csv         # Runtime sample log
 └── requirements.txt
 ```
@@ -224,13 +220,12 @@ Raw metrics → Feature vector (7 values)
            → Each detector's predict()      → pred ∈ {1, -1}, score, latency
            → AnomalyExplainer (z-scores)    → top-3 deviating features
            → DriftDetector (Page-Hinkley)   → drift flag
-           → Alerter                        → desktop notification / log
            → CSVLogger                      → performance_log.csv
 ```
 
 ### Drift Detection
 
-The `DriftDetector` runs a Page-Hinkley test on the anomaly score stream. When the cumulative deviation from the running mean exceeds a configurable threshold (default 50), a drift flag is raised and the alerting system fires a drift alert, suggesting retraining.
+One `DriftDetector` per detector runs a Page-Hinkley test on that detector's own score stream. The raw statistic is written to the log each sample; no threshold is applied and no alert is raised.
 
 ---
 
@@ -287,66 +282,16 @@ Mean score    : -0.0089
 Score std     : 0.2870
 ```
 
-### Alert Log — `alerts.jsonl`
-
-Every alert fired by the `Alerter` is appended to `alerts.jsonl` as a newline-delimited JSON record. The file survives across sessions and is never truncated, making it a durable audit trail.
-
-**Record schema:**
-
-```jsonc
-{
-  "time":        "2026-02-18T09:39:55.515272",   // ISO-8601 local time
-  "kind":        "anomaly",                        // "anomaly" | "drift"
-  "score":       -0.4734,                          // raw decision score
-  "explanation": [                                 // top-3 deviating features
-    "gpu_memory: 8.0 (high, expected ≈6.6, z=25.5)",
-    "gpu_temp: 42.0 (high, expected ≈40.1, z=6.9)",
-    "cpu_memory: 43.6 (high, expected ≈42.8, z=4.4)"
-  ],
-  "metrics": {                                     // raw feature snapshot
-    "cpu_percent": 35.5,
-    "cpu_freq": 3100.0,
-    "cpu_memory": 43.6,
-    "cpu_temp": 54.26,
-    "gpu_percent": 12.0,
-    "gpu_memory": 8.03,
-    "gpu_temp": 42.0
-  }
-}
-```
-
-**Stats from a real session (234 alerts over ~55 minutes):**
-
-| Metric | Value |
-|---|---|
-| Total alerts | 234 |
-| Alert types | anomaly: 234, drift: 0 |
-| Score range | −0.499 to −0.002 |
-| Most flagged feature | `gpu_temp` (130×) |
-| Second most flagged | `cpu_temp` (115×) |
-| Third most flagged | `gpu_memory` (94×) |
-| Session window | 09:38 → 10:33 |
-
-The explainer starts with `"Insufficient baseline data"` for the first ~30 samples while the rolling stats window fills, then switches to per-feature z-score attribution automatically.
-
-### Cooldown & Deduplication
-
-The alerter enforces per-kind cooldowns so a sustained anomaly period doesn't flood the log — anomaly alerts fire at most once every `cooldown_s` seconds (default 10 s), and drift alerts at most once every `cooldown_s × 6` seconds (default 60 s). All records still appear in `alerts.jsonl`; the cooldown only gates desktop notifications and terminal output.
-
----
-
 ##  Configuration
 
 Key parameters are defined at the top of each module:
 
 | File | Parameter | Default | Description |
 |---|---|---|---|
-| `alerting.py` | `cooldown_s` | `10` | Min seconds between anomaly alerts |
 | `anomaly_detector.py` | `DriftDetector.threshold` | `50.0` | Page-Hinkley drift sensitivity |
 | `logger.py` | `flush_every` | `10` | Rows between disk flushes |
 | `collect_normal.py` | `DURATION` | `1200` | Seconds of normal data to collect |
 | `collect_labeled.py` | `DURATION` | `300` | Seconds of labeled data to collect |
-| `process_tracker.py` | `top_n` | `5` | Processes shown in the tracker |
 
 ---
 
@@ -363,7 +308,6 @@ tensorflow>=2.0
 joblib
 matplotlib
 PyQt5
-plyer          # optional – desktop notifications
 keyboard       # optional – for collect_labeled.py
 wmi            # optional – Windows CPU temperature
 ```
@@ -382,7 +326,7 @@ Building this project was a genuinely rewarding challenge. Applying ML to a **re
 
 A few things that stood out:
 
-- **Real-time systems demand different thinking.** Every design decision - from the background temperature thread to the non-blocking alerter — had to account for timing, jitter, and the fact that a slow read blocks everything downstream. Static ML pipelines don't prepare you for that.
+- **Real-time systems demand different thinking.** Every design decision - from the background temperature thread to the collector loop — had to account for timing, jitter, and the fact that a slow read blocks everything downstream. Static ML pipelines don't prepare you for that.
 
 - **ML on live hardware data is tougher than it looks.** Sensor noise, sudden CPU frequency drops, GPU memory spikes from unrelated background apps — all of it looks like an anomaly to a model that was trained on clean data. Getting the balance between sensitivity and false-positive rate right required a lot of iteration.
 
@@ -414,4 +358,3 @@ Overall, this project gave me hands-on insight into the gap between "ML that wor
 |  PyQt5 | Live dashboard GUI |
 |  psutil + GPUtil | Hardware metric collection |
 |  Matplotlib | Benchmark visualisations |
-|  plyer | Cross-platform desktop notifications |
