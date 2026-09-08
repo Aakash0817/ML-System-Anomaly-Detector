@@ -14,9 +14,23 @@ except ImportError:
 # Runs WMI in its own dedicated thread with its own CoInitialize.
 # The producer loop just reads _last_cpu_temp without waiting.
 
-_last_cpu_temp = 45.0    # sensible startup default
+_last_cpu_temp = None    # None until a read actually succeeds
+_last_cpu_temp_time = 0.0
 _temp_lock     = threading.Lock()
 _temp_interval = 2.0     # read temperature every 2 seconds
+TEMP_MAX_AGE_S = 10.0    # a reading older than this is reported as unavailable
+
+# Each distinct failure reason is reported once, not once per sample.
+_logged_reasons: set = set()
+_log_lock = threading.Lock()
+
+
+def _log_once(key: str, message: str) -> None:
+    with _log_lock:
+        if key in _logged_reasons:
+            return
+        _logged_reasons.add(key)
+    print(message, flush=True)
 
 
 def _temperature_worker():
@@ -24,9 +38,14 @@ def _temperature_worker():
     Dedicated thread for WMI temperature reads.
     Has its own CoInitialize so it never blocks the producer.
     """
-    global _last_cpu_temp
+    global _last_cpu_temp, _last_cpu_temp_time
 
-    import pythoncom
+    try:
+        import pythoncom
+    except ImportError:
+        _log_once('temp_pythoncom',
+                  "[TempWorker] pywin32 not installed - CPU temperature unavailable.")
+        return
     pythoncom.CoInitialize()
 
     wmi_conn = None
@@ -35,7 +54,7 @@ def _temperature_worker():
         wmi_conn = wmi.WMI(namespace="root\\OpenHardwareMonitor")
         print("[TempWorker] WMI connected.", flush=True)
     except Exception as e:
-        print(f"[TempWorker] WMI connect failed: {e}", flush=True)
+        _log_once('temp_wmi_connect', f"[TempWorker] WMI connect failed: {e}")
 
     while True:
         temp = None
@@ -55,7 +74,7 @@ def _temperature_worker():
                 if cpu_temps:
                     temp = max(cpu_temps)
             except Exception as e:
-                print(f"[TempWorker] Read error: {e}", flush=True)
+                _log_once('temp_wmi_read', f"[TempWorker] WMI read error: {e}")
                 # Try to reconnect next cycle
                 try:
                     import wmi
@@ -83,14 +102,35 @@ def _temperature_worker():
         if temp is not None:
             with _temp_lock:
                 _last_cpu_temp = temp
+                _last_cpu_temp_time = time.time()
+        else:
+            _log_once('temp_no_source',
+                      "[TempWorker] No CPU temperature source available.")
 
         time.sleep(_temp_interval)
 
 
 def get_cpu_temperature():
-    """Non-blocking — returns the last reading from the background thread."""
+    """
+    Non-blocking. Returns the last good reading from the background thread,
+    or None when no read has ever succeeded or the most recent one is older
+    than TEMP_MAX_AGE_S. Never substitutes a placeholder value.
+    """
     with _temp_lock:
-        return _last_cpu_temp
+        value, taken_at = _last_cpu_temp, _last_cpu_temp_time
+
+    if value is None:
+        _log_once('temp_never',
+                  "[TempWorker] No CPU temperature reading yet - reporting None.")
+        return None
+
+    if time.time() - taken_at > TEMP_MAX_AGE_S:
+        _log_once('temp_stale',
+                  f"[TempWorker] CPU temperature older than {TEMP_MAX_AGE_S:.0f}s "
+                  "- reporting None.")
+        return None
+
+    return value
 
 
 # Start the background temperature thread immediately on import
@@ -109,20 +149,50 @@ def get_cpu_metrics():
 
 
 # ── GPU metrics ───────────────────────────────────────────────────────────────
+GPU_FIELDS = ('gpu_percent', 'gpu_memory', 'gpu_temp')
+
+
+def _gpu_unavailable() -> dict:
+    """No reading is available; report that rather than inventing zeros."""
+    d = {f: None for f in GPU_FIELDS}
+    d['gpu_available'] = False
+    return d
+
+
 def get_gpu_metrics():
-    if GPUTIL_AVAILABLE:
-        try:
-            gpus = GPUtil.getGPUs()
-            if gpus:
-                gpu = gpus[0]
-                return {
-                    'gpu_percent': gpu.load * 100,
-                    'gpu_memory':  gpu.memoryUtil * 100,
-                    'gpu_temp':    gpu.temperature,
-                }
-        except Exception:
-            pass
-    return {'gpu_percent': 0, 'gpu_memory': 0, 'gpu_temp': 0}
+    """
+    Returns the three GPU fields plus gpu_available. On any failure the
+    fields are None and gpu_available is False — never 0, which is a
+    legitimate reading for an idle GPU.
+    """
+    if not GPUTIL_AVAILABLE:
+        _log_once('gpu_import',
+                  "[GPU] GPUtil not installed - GPU metrics unavailable.")
+        return _gpu_unavailable()
+
+    try:
+        gpus = GPUtil.getGPUs()
+    except Exception as e:
+        _log_once('gpu_query',
+                  f"[GPU] GPUtil query failed ({e}) - GPU metrics unavailable.")
+        return _gpu_unavailable()
+
+    if not gpus:
+        _log_once('gpu_none', "[GPU] No GPU detected - GPU metrics unavailable.")
+        return _gpu_unavailable()
+
+    try:
+        gpu = gpus[0]
+        return {
+            'gpu_percent': gpu.load * 100,
+            'gpu_memory':  gpu.memoryUtil * 100,
+            'gpu_temp':    gpu.temperature,
+            'gpu_available': True,
+        }
+    except Exception as e:
+        _log_once('gpu_read',
+                  f"[GPU] GPU attribute read failed ({e}) - GPU metrics unavailable.")
+        return _gpu_unavailable()
 
 
 # ── Core type mapping ─────────────────────────────────────────────────────────
