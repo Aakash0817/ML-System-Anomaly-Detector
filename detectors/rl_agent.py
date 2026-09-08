@@ -31,7 +31,7 @@ class RLAgentDetector:
         """
         Returns:
             pred:  1 = normal, -1 = anomaly
-            score: probability of anomaly (0..1)
+            score: higher = more normal, in [-1, 1]
             latency: inference time in milliseconds
         """
         start = time.perf_counter()          # ← start timer
@@ -40,12 +40,14 @@ class RLAgentDetector:
         X = np.array([[features[f] for f in self.feature_order]])
         X_scaled = self.scaler.transform(X)
 
-        # Probability of class 1 (anomaly)
+        # The sigmoid head outputs P(anomaly), because train_rl.py keeps the
+        # collect_labeled convention of 0 = normal, 1 = anomaly. Map it onto the
+        # project-wide score convention used by every other detector:
+        # higher = more normal, on [-1, 1].
         proba = self.model.predict(X_scaled, verbose=0)[0, 0]
-        score = float(proba)
+        score = float(1.0 - 2.0 * proba)
 
-        # Convert to -1/1 prediction (threshold at 0.5)
-        pred = -1 if score > 0.5 else 1
+        pred = 1 if score > 0 else -1
 
         latency = (time.perf_counter() - start) * 1000   # ← elapsed ms
 
